@@ -152,6 +152,12 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux.Handle("/graph/", s.requireKey(http.StripPrefix("/graph", view.Handler())))
 	mux.HandleFunc("/athanor/loads", s.handleLoads)
 	mux.HandleFunc("/athanor/loads/form", s.handleLoadForm)
+	// The vocabulary as a workflow rather than a string pasted into every job:
+	// draft, propose from a run, approve, publish (ontologies.go). "current" is
+	// a literal segment and an id always carries an "@", so it cannot be one.
+	mux.HandleFunc("/athanor/ontologies", s.handleOntologies)
+	mux.HandleFunc("/athanor/ontologies/current", s.handleOntologyCurrent)
+	mux.HandleFunc("/athanor/ontologies/{id}", s.handleOntologyVersion)
 	mux.Handle("/metrics", s.requireKey(metrics.Handler()))
 	mux.Handle("/debug/vars", s.requireKey(expvar.Handler()))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
