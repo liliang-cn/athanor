@@ -50,11 +50,54 @@ A held job is refused at step 3 until someone answers at step 2. The brain
 holds only graphs that finished, and finished means reviewed when review was
 owed.
 
+## The vocabulary, as a workflow
+
+An ontology used to be a JSON string pasted into every `CreateJob`, with no
+record of which edit was in force or who accepted the type that let a fact in.
+alchemy has the two hard pieces — a run reports the types its corpus used and
+the vocabulary lacked, and `Extend` declares the accepted ones under a new id —
+and holds neither, because it holds nothing. Athanor holds them, in the brain,
+in two tables beside the graph they govern.
+
+```sh
+# draft a vocabulary; the body is the document itself
+curl -H "$K" -H 'Content-Type: application/json' --data-binary @sds.json \
+  http://127.0.0.1:47832/athanor/ontologies
+# a finished run wanted types it does not declare — record them
+curl -H "$K" -d '{"job":"<id>","part":"prose"}' \
+  'http://127.0.0.1:47832/athanor/ontologies/sds@1:propose'
+# accept some of them: Extend runs, sds@2 is written, parent sds@1
+curl -H "$K" -d '{"accept":["Cluster","member_of"],"by":"liliang","note":"both are real"}' \
+  'http://127.0.0.1:47832/athanor/ontologies/sds@1:approve'
+# make it current; sds@1 is retired, recorded
+curl -H "$K" -d '{"by":"liliang"}' \
+  'http://127.0.0.1:47832/athanor/ontologies/sds@2:publish'
+# what a client pastes into the next CreateJob
+curl -H "$K" 'http://127.0.0.1:47832/athanor/ontologies/current?lineage=sds'
+```
+
+`GET /athanor/ontologies` lists every version; `GET /athanor/ontologies/{id}`
+is one of them with its state, parent, proposals and signatures. Reads take any
+key from the policy, writes take a read-write one, same as every other door.
+
+A held job is refused at `:propose` exactly as it is at `/athanor/loads`, and
+by the same call: the proposals are pulled through alchemy's own `GetResult`.
+Approving without a `by` is refused — a judgement about what a type means, and
+one nobody is named for, cannot be argued with later. One version of a lineage
+is published at a time; publishing the next retires the previous.
+
+Retired is not deleted, and nothing that ran under a retired version is
+touched. A job carries the document it was created with, every record it
+produced names that id in its provenance, and the row keeps its body — so a
+graph loaded under `sds@1` can still be asked what checked it, long after
+`sds@2` became current.
+
 ## What is where
 
 | | |
 |---|---|
 | `pkg/server` | the assembly: one policy over two services, and the load |
+| `pkg/ontologies` | vocabulary versions and the signed acts on them |
 | `deploy/` | systemd, Docker, compose, example key file |
 | `docs/superpowers/specs/` | the design, and why the two decisions were made |
 
@@ -66,8 +109,9 @@ and neither depends on it.
 
 ## Next
 
-Decision ledger; a general rule engine and ontology propose → approve →
-publish; point-in-time snapshots. In that order — see the spec.
+Decision ledger; a general rule engine; point-in-time snapshots. In that
+order — see the spec. Ontology propose → approve → publish is done, and its
+acts are shaped to become the ledger's second kind of entry.
 
 ## License
 
