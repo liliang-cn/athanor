@@ -22,14 +22,21 @@ const alchemyPrefix = "/alchemy.v1.Alchemy/"
 // model budget and admits work into a bounded store, and UploadSource because
 // it puts bytes on the spool.
 var alchemyAccess = map[string]authz.Access{
-	alchemyPrefix + "UploadSource":   authz.Write,
-	alchemyPrefix + "CreateJob":      authz.Write,
-	alchemyPrefix + "GetJob":         authz.Read,
-	alchemyPrefix + "WatchJob":       authz.Read,
-	alchemyPrefix + "GetResult":      authz.Read,
-	alchemyPrefix + "StreamResult":   authz.Read,
-	alchemyPrefix + "DeleteJob":      authz.Write,
-	alchemyPrefix + "Review":         authz.Read,
+	alchemyPrefix + "UploadSource": authz.Write,
+	alchemyPrefix + "CreateJob":    authz.Write,
+	alchemyPrefix + "GetJob":       authz.Read,
+	alchemyPrefix + "WatchJob":     authz.Read,
+	alchemyPrefix + "GetResult":    authz.Read,
+	alchemyPrefix + "StreamResult": authz.Read,
+	alchemyPrefix + "DeleteJob":    authz.Write,
+	// Review is a write, and classifying it Read was a mistake in the first
+	// version of this table. The RPC is `stream ReviewDecision` INBOUND: the
+	// client sends decisions on it, and it is how a held job gets unblocked —
+	// the same act Decide performs, over a stream instead of a call. A
+	// read-only key could therefore decide a conflict and change what the graph
+	// says. Found when the ledger started recording who decided what and a
+	// reader turned up as an actor.
+	alchemyPrefix + "Review":         authz.Write,
 	alchemyPrefix + "ListFindings":   authz.Read,
 	alchemyPrefix + "Decide":         authz.Write,
 	alchemyPrefix + "ExtendOntology": authz.Write,

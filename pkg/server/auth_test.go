@@ -79,3 +79,23 @@ func TestAStreamThatIsNotThePipelinesIsRefused(t *testing.T) {
 		t.Fatalf("a reader was refused a read stream: %v", err)
 	}
 }
+
+// Review carries decisions inbound — `stream ReviewDecision` — so it is the
+// same act as Decide and a read-only key must not reach it. It was classified
+// Read in the first version of the table; this test is what makes that a
+// decision rather than an oversight that can come back.
+func TestAReadOnlyKeyCannotDecideOverTheReviewStream(t *testing.T) {
+	h := newHarness(t, fakeRunner{})
+	stream, err := alchemyv1.NewAlchemyClient(h.conn).Review(asKey("ro-secret"))
+	if err != nil {
+		t.Fatalf("open stream: %v", err)
+	}
+	// The refusal may arrive on the send or on the first receive, depending on
+	// when the interceptor runs relative to the client's buffering; either is
+	// the same refusal.
+	sendErr := stream.Send(&alchemyv1.ReviewDecision{JobId: "j", ItemId: "i", Verb: alchemyv1.ReviewVerb_REVIEW_VERB_ACCEPT, By: "someone"})
+	_, recvErr := stream.Recv()
+	if status.Code(sendErr) != codes.PermissionDenied && status.Code(recvErr) != codes.PermissionDenied {
+		t.Fatalf("a read-only key was allowed onto the review stream: send=%v recv=%v", sendErr, recvErr)
+	}
+}
