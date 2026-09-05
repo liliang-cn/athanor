@@ -50,9 +50,12 @@ func (s *Store) Draft(ctx context.Context, document []byte, by, note string) (Ve
 		}
 		return Version{}, fmt.Errorf("ontologies: draft %s: %w", o.ID, err)
 	}
-	if err := s.record(ctx, nil, ActDraft, by, v.ID, note, at); err != nil {
+	act, err := s.record(ctx, nil, Act{Kind: ActDraft, Actor: by, Key: by, At: at, Subject: v.ID, Note: note})
+	if err != nil {
 		return Version{}, err
 	}
+	// The draft stands whether or not the audit view hears about it.
+	_ = s.mirror(ctx, act)
 	return v, nil
 }
 
@@ -100,9 +103,14 @@ func (s *Store) Propose(ctx context.Context, id, job, part string, proposals []a
 	if _, err := s.exec(ctx, q, string(state), part, string(encoded), job, id); err != nil {
 		return Version{}, fmt.Errorf("ontologies: propose against %s: %w", id, err)
 	}
-	if err := s.record(ctx, nil, ActPropose, by, id, proposeNote(job, part, proposals, note), at); err != nil {
+	act, err := s.record(ctx, nil, Act{
+		Kind: ActPropose, Actor: by, Key: by, At: at, Subject: id,
+		Note: proposeNote(job, part, proposals, note),
+	})
+	if err != nil {
 		return Version{}, err
 	}
+	_ = s.mirror(ctx, act)
 	v.State, v.Part, v.Proposals, v.ProposedFrom = state, part, proposals, job
 	return v, nil
 }
@@ -134,6 +142,10 @@ type Approval struct {
 	By string
 	// Note is why.
 	Note string
+	// Key is the id of the key the request came in on, when a door supplied
+	// one. By is what the approval is signed with and Key is who actually
+	// called; when they differ, the ledger keeps both — see Act.Key.
+	Key string
 	// NewID overrides the id of the new version. Empty increments the version
 	// half, which Extend does and refuses to invent when it is not a number.
 	NewID string
@@ -206,9 +218,14 @@ func (s *Store) Approve(ctx context.Context, id string, req Approval) (Version, 
 		}
 		return Version{}, fmt.Errorf("ontologies: approve %s: %w", extended.ID, err)
 	}
-	if err := s.record(ctx, nil, ActApprove, by, v.ID, approveNote(id, added, req.Note), at); err != nil {
+	act, err := s.record(ctx, nil, Act{
+		Kind: ActApprove, Actor: by, Key: firstNamed(req.Key, by), At: at, Subject: v.ID,
+		Note: approveNote(id, added, req.Note),
+	})
+	if err != nil {
 		return Version{}, err
 	}
+	_ = s.mirror(ctx, act)
 	return v, nil
 }
 
@@ -252,6 +269,33 @@ func pick(proposals []alchemy.Proposal, names []string) ([]alchemy.Proposal, err
 	return out, nil
 }
 
+// Publication is who made a version current, under whose key, and why.
+//
+// A struct rather than three strings for Approval's reason: By and Key are
+// both names, they mean different things, and two adjacent string parameters
+// that can be swapped without a compile error is a bug waiting for a hurried
+// afternoon.
+type Publication struct {
+	// By is who decided. Empty is refused: publishing decides what every job
+	// from now on is checked against.
+	By string
+	// Key is the id of the key the request came in on. Empty falls back to By,
+	// which is what a caller with no door in front of it has.
+	Key string
+	// Note is why.
+	Note string
+}
+
+// firstNamed is the first of these that is not blank.
+func firstNamed(values ...string) string {
+	for _, v := range values {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
 // Publish makes a version current and retires the one it replaces.
 //
 // One transaction, because the two halves are one fact. A retirement that
@@ -261,8 +305,9 @@ func pick(proposals []alchemy.Proposal, names []string) ([]alchemy.Proposal, err
 // index refuses that outright rather than letting `current` become a coin toss.
 //
 // It returns the published version and the id it retired, if any.
-func (s *Store) Publish(ctx context.Context, id, by, note string) (Version, string, error) {
-	by = strings.TrimSpace(by)
+func (s *Store) Publish(ctx context.Context, id string, req Publication) (Version, string, error) {
+	by := strings.TrimSpace(req.By)
+	note := req.Note
 	if by == "" {
 		return Version{}, "", fmt.Errorf("%w: publishing decides what every job from now on is checked against", ErrUnsigned)
 	}
@@ -285,6 +330,7 @@ func (s *Store) Publish(ctx context.Context, id, by, note string) (Version, stri
 	// alternative is that a vocabulary found to be wrong can only be undone by
 	// approving a new version that undoes it, which is a worse record of what
 	// happened than an act saying somebody went back.
+	var acts []Act
 	var retired string
 	const findCurrent = `SELECT id FROM athanor_ontology_versions
 		WHERE lineage = ? AND state = ? ORDER BY published_at DESC, id DESC`
@@ -300,20 +346,32 @@ func (s *Store) Publish(ctx context.Context, id, by, note string) (Version, stri
 		if _, err := s.txExec(ctx, tx, q, string(Retired), at, retired); err != nil {
 			return Version{}, "", fmt.Errorf("ontologies: retire %s: %w", retired, err)
 		}
-		if err := s.record(ctx, tx, ActRetire, by, retired, "replaced by "+id, at); err != nil {
+		act, err := s.record(ctx, tx, Act{
+			Kind: ActRetire, Actor: by, Key: firstNamed(req.Key, by), At: at,
+			Subject: retired, Note: "replaced by " + id,
+		})
+		if err != nil {
 			return Version{}, "", err
 		}
+		acts = append(acts, act)
 	}
 	const q = `UPDATE athanor_ontology_versions SET state = ?, published_at = ?, retired_at = NULL WHERE id = ?`
 	if _, err := s.txExec(ctx, tx, q, string(Published), at, id); err != nil {
 		return Version{}, "", fmt.Errorf("ontologies: publish %s: %w", id, err)
 	}
-	if err := s.record(ctx, tx, ActPublish, by, id, publishNote(retired, note), at); err != nil {
+	act, err := s.record(ctx, tx, Act{
+		Kind: ActPublish, Actor: by, Key: firstNamed(req.Key, by), At: at,
+		Subject: id, Note: publishNote(retired, note),
+	})
+	if err != nil {
 		return Version{}, "", err
 	}
+	acts = append(acts, act)
 	if err := tx.Commit(); err != nil {
 		return Version{}, "", fmt.Errorf("ontologies: publish %s: %w", id, err)
 	}
+	// After the commit, never inside it: see Store.record.
+	_ = s.mirror(ctx, acts...)
 
 	v.State = Published
 	v.PublishedAt = &at

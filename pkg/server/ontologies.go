@@ -57,7 +57,9 @@ type ontologyStore struct {
 func (s *Server) ontologies() (*ontologies.Store, error) {
 	entry, _ := ontologyStores.LoadOrStore(s.db, &ontologyStore{})
 	h := entry.(*ontologyStore)
-	h.once.Do(func() { h.store, h.err = ontologies.New(s.db) })
+	h.once.Do(func() {
+		h.store, h.err = ontologies.New(s.db, ontologies.WithLedger(ontologyLedger{srv: s}))
+	})
 	return h.store, h.err
 }
 
@@ -234,7 +236,7 @@ func (s *Server) handleOntologyVersion(w http.ResponseWriter, r *http.Request) {
 	case verbPropose:
 		s.proposeOntology(w, r, store, key, id)
 	case verbApprove:
-		s.approveOntology(w, r, store, id)
+		s.approveOntology(w, r, store, key, id)
 	case verbPublish:
 		s.publishOntology(w, r, store, key, id)
 	}
@@ -295,13 +297,13 @@ type approveRequest struct {
 	Part string `json:"part,omitempty"`
 }
 
-func (s *Server) approveOntology(w http.ResponseWriter, r *http.Request, store *ontologies.Store, id string) {
+func (s *Server) approveOntology(w http.ResponseWriter, r *http.Request, store *ontologies.Store, key authz.Key, id string) {
 	var req approveRequest
 	if !decodeBody(w, r, &req) {
 		return
 	}
 	version, err := store.Approve(r.Context(), id, ontologies.Approval{
-		Accept: req.Accept, By: req.By, Note: req.Note, NewID: req.ID, Part: req.Part,
+		Accept: req.Accept, By: req.By, Key: key.ID, Note: req.Note, NewID: req.ID, Part: req.Part,
 	})
 	if err != nil {
 		ontologyError(w, err)
@@ -328,7 +330,9 @@ func (s *Server) publishOntology(w http.ResponseWriter, r *http.Request, store *
 	if by == "" {
 		by = key.ID
 	}
-	version, retired, err := store.Publish(r.Context(), id, by, req.Note)
+	version, retired, err := store.Publish(r.Context(), id, ontologies.Publication{
+		By: by, Key: key.ID, Note: req.Note,
+	})
 	if err != nil {
 		ontologyError(w, err)
 		return

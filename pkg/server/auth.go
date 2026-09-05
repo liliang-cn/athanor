@@ -35,8 +35,24 @@ import (
 // are the ones the key file names.
 //
 // What this does not do: row confinement on the pipeline. A scoped key
-// confined to one user_id has nothing on a CreateJob to be confined by. That
-// is a gap the decision ledger closes, not one to paper over here.
+// confined to one user_id has nothing on a CreateJob to be confined by.
+//
+// The decision ledger closes half of that, and it is worth being exact about
+// which half. A ledger entry names its actor, so the ledger's own read routes
+// *are* confined: a key confined to a user_id sees only the entries it signed,
+// and a chain whose root was signed by somebody else answers exactly as a
+// chain that does not exist (ledger.go).
+//
+// The pipeline itself is still not confined, and the reason is not that the
+// job store forgets — an ownership table minted at CreateJob would have the
+// same lifetime as the in-memory job store and would work. It is that a job is
+// not the only row on the pipeline. UploadSource returns a source id, and
+// CreateJob names source ids; a confined key that cannot be stopped from
+// naming somebody else's source id is not confined, it is confined-looking.
+// Closing that needs the spool to carry an owner, which is alchemy's to add
+// and not something Athanor can bolt on from outside without holding the
+// service — the thing this file exists to avoid. So: no partial confinement
+// here. A guarantee with a hole in it reads as a guarantee.
 
 // internalToken is the credential alchemy's interceptor is shown. Minted per
 // process, never logged, never configurable.
@@ -79,26 +95,31 @@ func withInternalToken(ctx context.Context, token string) context.Context {
 
 // authorizeAlchemy is the pipeline half of the policy: who is calling, and
 // may they call this. Row confinement does not apply — see the package note.
-func (s *Server) authorizeAlchemy(ctx context.Context, fullMethod string) error {
+//
+// It returns the key it resolved as well as its verdict, because the ledger
+// hooks downstream have to record who acted and cannot read it back out of the
+// metadata: withInternalToken has replaced the caller's credential with the
+// process's own by the time a handler runs (ledger_hooks.go).
+func (s *Server) authorizeAlchemy(ctx context.Context, fullMethod string) (authz.Key, error) {
 	access, classified := alchemyAccess[fullMethod]
 	if !classified {
-		return status.Errorf(codes.PermissionDenied, "denied: %s is not classified as a read or a write", fullMethod)
+		return authz.Key{}, status.Errorf(codes.PermissionDenied, "denied: %s is not classified as a read or a write", fullMethod)
 	}
 	if !s.keys.Enabled() {
-		return nil
+		return authz.Key{ID: openKeyID, Clearance: authz.ReadWrite}, nil
 	}
 	secret, ok := bearerFrom(ctx)
 	if !ok {
-		return status.Error(codes.Unauthenticated, "missing authorization metadata")
+		return authz.Key{}, status.Error(codes.Unauthenticated, "missing authorization metadata")
 	}
 	key, ok := s.keys.Lookup(secret)
 	if !ok {
-		return status.Error(codes.Unauthenticated, "invalid token")
+		return authz.Key{}, status.Error(codes.Unauthenticated, "invalid token")
 	}
 	if err := key.AuthorizeOperation(fullMethod, authz.Method{Access: access}); err != nil {
-		return status.Error(codes.PermissionDenied, err.Error())
+		return authz.Key{}, status.Error(codes.PermissionDenied, err.Error())
 	}
-	return nil
+	return key, nil
 }
 
 func (s *Server) unaryAuth() grpc.UnaryServerInterceptor {
@@ -108,10 +129,11 @@ func (s *Server) unaryAuth() grpc.UnaryServerInterceptor {
 		if !strings.HasPrefix(info.FullMethod, alchemyPrefix) {
 			return cortex(ctx, req, info, handler)
 		}
-		if err := s.authorizeAlchemy(ctx, info.FullMethod); err != nil {
+		key, err := s.authorizeAlchemy(ctx, info.FullMethod)
+		if err != nil {
 			return nil, err
 		}
-		return pipeline(withInternalToken(ctx, s.internal), req, info, handler)
+		return pipeline(withCallerKey(withInternalToken(ctx, s.internal), key), req, info, handler)
 	}
 }
 
@@ -125,10 +147,12 @@ func (s *Server) streamAuth() grpc.StreamServerInterceptor {
 		if !strings.HasPrefix(info.FullMethod, alchemyPrefix) {
 			return status.Errorf(codes.PermissionDenied, "denied: %s is a stream this server has no policy for", info.FullMethod)
 		}
-		if err := s.authorizeAlchemy(ss.Context(), info.FullMethod); err != nil {
+		key, err := s.authorizeAlchemy(ss.Context(), info.FullMethod)
+		if err != nil {
 			return err
 		}
-		return pipeline(srv, &swappedStream{ServerStream: ss, ctx: withInternalToken(ss.Context(), s.internal)}, info, handler)
+		ctx := withCallerKey(withInternalToken(ss.Context(), s.internal), key)
+		return pipeline(srv, &swappedStream{ServerStream: ss, ctx: ctx}, info, handler)
 	}
 }
 

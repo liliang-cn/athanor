@@ -3,6 +3,7 @@ package server
 import (
 	"html/template"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/liliang-cn/cortexdb/v2/pkg/cortexdb"
@@ -63,6 +64,16 @@ nav a{margin-right:1.2rem}form.in input{font:inherit;padding:.4rem .6rem;width:2
 {{range .Attention}}<tr><td><code>{{.Grade}}</code></td><td>{{.Record}}</td><td class="why">{{.Why}}</td><td class="muted">{{.Source}}</td></tr>{{end}}
 </table>{{end}}
 
+<h2>Decisions</h2>
+<p class="muted">Every act this server performed, and every one an agent recorded through it.
+<code>GET /athanor/decisions?kind=&amp;subject=&amp;actor=</code> asks the same question from a script.</p>
+{{if not .Decisions}}<p class="muted">Nothing has been decided yet.</p>{{else}}
+<table>
+<tr><th>when</th><th>kind</th><th>who</th><th>what</th></tr>
+{{range .Decisions}}<tr><td class="muted">{{.At}}</td><td><code>{{.Kind}}</code></td><td>{{.Actor}}</td>
+<td><a href="/athanor/decisions/{{.Href}}">{{.Line}}</a></td></tr>{{end}}
+</table>{{end}}
+
 <h2>Load a finished job into the brain</h2>
 <p class="muted">Jobs come from <a href="/v1/jobs">/v1/jobs</a>; a held job is refused here until it is reviewed.
 <code>POST /athanor/loads {"job": "…"}</code> with your bearer key does the same from a script.</p>
@@ -83,11 +94,20 @@ type attentionRow struct {
 	Grade, Record, Why, Source string
 }
 
+// decisionRow is one ledger entry as the front page shows it: when, what kind,
+// who, and the first line of the note — which is the sentence the entry was
+// written as. The structured detail below it belongs on the chain page, where
+// there is room to read it.
+type decisionRow struct {
+	Kind, Actor, At, Line, Href string
+}
+
 type homeData struct {
 	Describe  string
 	SignedIn  bool
 	Tally     []tallyRow
 	Attention []attentionRow
+	Decisions []decisionRow
 	Notice    string
 }
 
@@ -113,6 +133,13 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 		if t, err := s.db.ContractTally(r.Context()); err == nil {
 			data.Tally = tallyRows(t)
 		}
+		// The latest twenty, Athanor's own beside the agents'. An error here
+		// leaves the section empty rather than the page broken: the front page
+		// is a view and a view that refuses to render because one of its four
+		// questions failed is worse than one that shows the other three.
+		if recs, err := s.latestDecisions(r.Context(), homeDecisionLimit); err == nil {
+			data.Decisions = decisionRows(recs)
+		}
 		if att, err := s.db.NeedsAttention(r.Context(), 20); err == nil {
 			for _, a := range att {
 				rec := a.Content
@@ -125,6 +152,25 @@ func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = homeTmpl.Execute(w, data)
+}
+
+// homeDecisionLimit is the twenty the front page shows. The rest are a query
+// away, and a front page that scrolled the whole ledger would be a report.
+const homeDecisionLimit = 20
+
+func decisionRows(recs []cortexdb.DecisionRecord) []decisionRow {
+	out := make([]decisionRow, 0, len(recs))
+	for _, rec := range recs {
+		line, _, _ := strings.Cut(rec.Note, "\n")
+		out = append(out, decisionRow{
+			Kind:  rec.Kind,
+			Actor: rec.Actor,
+			At:    rec.At,
+			Line:  line,
+			Href:  url.PathEscape(rec.ID),
+		})
+	}
+	return out
 }
 
 func tallyRows(t cortexdb.ContractTally) []tallyRow {

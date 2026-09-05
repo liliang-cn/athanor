@@ -57,6 +57,14 @@ func newHarness(t *testing.T, run service.Runner) *harness {
 	if err := os.WriteFile(keyFile, []byte(keysJSON), 0o600); err != nil {
 		t.Fatalf("keys: %v", err)
 	}
+	return newHarnessWith(t, run, keyFile, dir)
+}
+
+// newHarnessWith is newHarness with the policy named rather than assumed, for
+// the tests that need a third key — a confined one — and would otherwise have
+// to copy the whole of this.
+func newHarnessWith(t *testing.T, run service.Runner, keyFile, dir string) *harness {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
