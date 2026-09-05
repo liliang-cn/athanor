@@ -16,8 +16,9 @@ import (
 // a sign-in form sets, because a browser cannot send a bearer header on its
 // own. The cookie is the secret itself, HttpOnly and SameSite=Strict; nothing
 // here invents a session store to protect a credential the key file already
-// holds in plain text. The review UI alchemy ships (/ui) has a sign-in of its
-// own; unifying the two is a follow-up, not a reason to ship no front page.
+// holds in plain text. The review UI alchemy ships (/ui) had a sign-in of its
+// own and no longer needs one: this form is the only one, and session.go
+// carries what it establishes into that UI.
 
 const cookieName = "athanor_key"
 
@@ -154,8 +155,15 @@ func (s *Server) handleSignin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
+// handleSignout ends both sessions. One form signed the person in, so one
+// button has to sign them out of everything it opened — a review UI still
+// open after "Sign out" is worse than two sign-in forms ever were.
 func (s *Server) handleSignout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
+	http.SetCookie(w, &http.Cookie{
+		Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
+		SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil,
+	})
+	clearAlchemySession(w, r)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 

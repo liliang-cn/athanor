@@ -198,7 +198,9 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 	s.gatewayConn, s.stopGateway = conn, cancel
 	s.mux.Handle("/v1/", gw)
-	s.mux.Handle("/ui/", gw)
+	// One sign-in for both browser UIs: Athanor's cookie becomes the header
+	// alchemy's viewer already accepts (session.go).
+	s.mux.Handle("/ui/", s.oneSignIn(gw))
 	close(s.grpcAddrReady)
 
 	s.http = &http.Server{Handler: s.mux, ReadHeaderTimeout: 10 * time.Second}
