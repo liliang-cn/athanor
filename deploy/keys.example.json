@@ -1,0 +1,8 @@
+{
+  "keys": [
+    {"id": "operator", "secret": "replace-with-openssl-rand-hex-32", "clearance": "read-write"},
+    {"id": "auditor",  "secret": "replace-with-openssl-rand-hex-32", "clearance": "read-only"},
+    {"id": "hermes",   "secret": "replace-with-openssl-rand-hex-32", "clearance": "read-write",
+     "scope": {"user_id": "hermes"}}
+  ]
+}

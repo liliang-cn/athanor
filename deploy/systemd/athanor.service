@@ -1,0 +1,58 @@
+# Athanor as a system service. Same shape as CortexDB's unit, which this was
+# verified against on Ubuntu 24.04 / systemd 255:
+#
+#   install -m 0755 athanor /usr/local/bin/
+#   useradd --system --home-dir /var/lib/athanor --shell /usr/sbin/nologin athanor
+#   install -d -m 0750 /etc/athanor
+#   install -m 0640 -o root -g athanor athanor.env /etc/athanor/athanor.env
+#   install -m 0644 athanor.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now athanor
+#
+# Every credential lives in the environment file. Never on ExecStart: a
+# running process's command line is readable by every account on the host.
+
+[Unit]
+Description=Athanor (CortexDB brain + alchemy pipeline behind one door)
+Documentation=https://github.com/liliang-cn/athanor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=athanor
+Group=athanor
+StateDirectory=athanor
+StateDirectoryMode=0700
+UMask=0077
+WorkingDirectory=/var/lib/athanor
+EnvironmentFile=/etc/athanor/athanor.env
+ExecStart=/usr/local/bin/athanor
+Restart=always
+RestartSec=2s
+TimeoutStopSec=30s
+KillSignal=SIGTERM
+LimitNOFILE=65535
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

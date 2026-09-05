@@ -1,0 +1,31 @@
+# cp deploy/docker/.env.example deploy/docker/.env   # edit the keys path
+# docker compose -f deploy/docker/docker-compose.yml up -d --build
+services:
+  athanor:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    image: athanor:local
+    container_name: athanor
+    environment:
+      ATHANOR_DB: /data/brain.db
+      ATHANOR_SPOOL: /data/spool
+      ATHANOR_GRPC_ADDR: 0.0.0.0:${ATHANOR_GRPC_PORT:-47831}
+      ATHANOR_HTTP_ADDR: 0.0.0.0:${ATHANOR_HTTP_PORT:-47832}
+      ATHANOR_KEY_FILE: /run/athanor/keys.json
+      ATHANOR_TOKEN: ${ATHANOR_TOKEN:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      CORTEXDB_EMBED_MODEL: ${CORTEXDB_EMBED_MODEL:-}
+      CORTEXDB_EMBED_DIM: ${CORTEXDB_EMBED_DIM:-}
+    ports:
+      - "${ATHANOR_BIND_HOST:-127.0.0.1}:${ATHANOR_GRPC_PORT:-47831}:${ATHANOR_GRPC_PORT:-47831}"
+      - "${ATHANOR_BIND_HOST:-127.0.0.1}:${ATHANOR_HTTP_PORT:-47832}:${ATHANOR_HTTP_PORT:-47832}"
+    volumes:
+      - athanor-data:/data
+      - ${ATHANOR_KEYS:-./keys.json}:/run/athanor/keys.json:ro
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+volumes:
+  athanor-data:
