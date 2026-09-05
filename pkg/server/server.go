@@ -147,11 +147,13 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux := http.NewServeMux()
 	// alchemy's gateway is attached in Serve, once the gRPC port it dials exists.
 	mux.Handle("/brain/", http.StripPrefix("/brain", brainREST))
-	mux.Handle("/graph/", http.StripPrefix("/graph", view.Handler()))
+	// The graph and the metrics are reads, but they are reads of everything;
+	// they get the same door as every other route (gate.go).
+	mux.Handle("/graph/", s.requireKey(http.StripPrefix("/graph", view.Handler())))
 	mux.HandleFunc("/athanor/loads", s.handleLoads)
 	mux.HandleFunc("/athanor/loads/form", s.handleLoadForm)
-	mux.Handle("/metrics", metrics.Handler())
-	mux.Handle("/debug/vars", expvar.Handler())
+	mux.Handle("/metrics", s.requireKey(metrics.Handler()))
+	mux.Handle("/debug/vars", s.requireKey(expvar.Handler()))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	mux.HandleFunc("/signin", s.handleSignin)
 	mux.HandleFunc("/signout", s.handleSignout)

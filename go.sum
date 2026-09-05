@@ -45,8 +45,8 @@ github.com/liliang-cn/alchemy v0.3.0 h1:DvXg3/mkxiGmeFsmqIalztuHBZXMiJEJ2qSL597e
 github.com/liliang-cn/alchemy v0.3.0/go.mod h1:n3N0sfAj7pP10GvB70FiEPb3YhZ3cQqcfL6EZ9/SeK8=
 github.com/liliang-cn/alchemy/connectors v0.3.0 h1:s+VSKdErVs9guKCBUbKX1Wjh15CcAwruqSLBw+qsoZM=
 github.com/liliang-cn/alchemy/connectors v0.3.0/go.mod h1:Tib//ZzsFbvYc2e/VW/u6n2WVN0TzWSDcQMsWTxtEhA=
-github.com/liliang-cn/cortexdb/v2 v2.96.0 h1:zGKCJlBlQotw2KWcexY1wsCLwMI6Yqj9PsgTX/mXCk0=
-github.com/liliang-cn/cortexdb/v2 v2.96.0/go.mod h1:O4EPYRbBsEpEsRisT2Hs2jhKVoEMPuRm87xAXpwLMwc=
+github.com/liliang-cn/cortexdb/v2 v2.97.0 h1:LOp+dTXYSW05d6FQUnq8lWcAwYYjT9WS8agxlHehD5A=
+github.com/liliang-cn/cortexdb/v2 v2.97.0/go.mod h1:O4EPYRbBsEpEsRisT2Hs2jhKVoEMPuRm87xAXpwLMwc=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=
 github.com/mattn/go-isatty v0.0.20/go.mod h1:W+V8PltTTMOvKvAeJH7IuucS94S2C6jfK/D7dTCTo3Y=
 github.com/modelcontextprotocol/go-sdk v1.6.1 h1:0zOSupjKUxPKSocPT1Wtago+mUHU2/uZ4xSOY0FGReU=
