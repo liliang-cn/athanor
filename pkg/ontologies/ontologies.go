@@ -68,6 +68,20 @@ type Act struct {
 	At      time.Time `json:"at"`
 	Subject string    `json:"subject"`
 	Note    string    `json:"note,omitempty"`
+
+	// Key is the door's own record of who called: the id of the key the
+	// request authenticated as. It is the same string as Actor for every act
+	// but an approval, which is signed with a person's name typed into the
+	// body — a name nobody checked and the one field here that has to survive
+	// an argument two years from now.
+	//
+	// It is not a column. The table has held five acts since it existed and
+	// adding one to it would mean either a migration this project does not
+	// have or a column that is empty for every row written before now; what
+	// Key is for is the ledger mirror (ledger.go), which happens in the same
+	// call that supplied it. An act read back out of the table therefore
+	// carries no Key, which is honest: the table never knew it.
+	Key string `json:"-"`
 }
 
 // The kinds this package records. They are namespaced because the ledger will

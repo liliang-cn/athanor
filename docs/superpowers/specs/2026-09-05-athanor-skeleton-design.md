@@ -78,6 +78,15 @@ Not done here: row confinement on the pipeline. A key confined to one
 `user_id` has nothing on `CreateJob` to be confined by. The decision ledger
 (sub-project 2) is where that closes.
 
+*As built, sub-project 2 closed half of it.* A ledger entry names its actor, so
+the ledger's own routes are confined: a key confined to a `user_id` sees only
+the entries it signed. The pipeline is still open, and not because a job could
+not be owned — an ownership table minted at `CreateJob` would have the same
+lifetime as the in-memory job store — but because a job is not the only row on
+it. `UploadSource` returns a source id and `CreateJob` names source ids, and a
+key that cannot be stopped from naming somebody else's source is not confined.
+Closing that needs the spool to carry an owner, which is alchemy's to add.
+
 ### Decision 2 — the brain receives finished graphs by an explicit act
 
 A job that finishes is not in the brain. `POST /athanor/loads {job, load}`

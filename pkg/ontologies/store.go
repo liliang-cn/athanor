@@ -17,6 +17,10 @@ type Store struct {
 	db      *sql.DB
 	dialect sqldialect.Dialect
 
+	// ledger, when set, receives a copy of every act this store records. It
+	// is an audit view and never an authority — see ledger.go.
+	ledger Ledger
+
 	// now is time.Now in production and a fixed clock in a test that needs
 	// two acts to be distinguishable. Unexported: a caller cannot forge when
 	// a decision was made.
@@ -28,11 +32,14 @@ type Store struct {
 // The dialect comes from the parent rather than from a DSN or a guess, so this
 // package cannot end up disagreeing with the handle it shares with pkg/graph
 // and pkg/cortexdb — agentmem's rule, kept.
-func New(db *cortexdb.DB) (*Store, error) {
+func New(db *cortexdb.DB, opts ...Option) (*Store, error) {
 	if db == nil {
 		return nil, errors.New("ontologies: nil cortexdb.DB")
 	}
 	s := &Store{db: db.SQL(), dialect: db.Dialect(), now: func() time.Time { return time.Now().UTC() }}
+	for _, opt := range opts {
+		opt(s)
+	}
 	ctx := context.Background()
 	if _, err := s.db.ExecContext(ctx, schemaSQL(s.dialect)); err != nil {
 		return nil, fmt.Errorf("ontologies: create schema: %w", err)
@@ -209,19 +216,25 @@ func (s *Store) Acts(ctx context.Context, subject string) ([]Act, error) {
 // record writes one act. Every state change in this package goes through it,
 // inside whatever transaction made the change, so a decision and its record
 // commit together or neither does.
-func (s *Store) record(ctx context.Context, tx *sql.Tx, kind, actor, subject, note string, at time.Time) error {
+//
+// It returns the act it wrote, with its minted id, so the caller can hand it
+// to the ledger once the transaction that made it has committed. The ledger is
+// never written from in here: it is a second writer on the same handle, and
+// inside an open write transaction that is a deadlock on SQLite.
+func (s *Store) record(ctx context.Context, tx *sql.Tx, act Act) (Act, error) {
 	id, err := mintID()
 	if err != nil {
-		return err
+		return Act{}, err
 	}
+	act.ID = id
 	const q = `INSERT INTO athanor_ontology_acts (id, kind, actor, at, subject, note) VALUES (?, ?, ?, ?, ?, ?)`
 	if tx == nil {
-		_, err = s.exec(ctx, q, id, kind, actor, at, subject, note)
+		_, err = s.exec(ctx, q, act.ID, act.Kind, act.Actor, act.At, act.Subject, act.Note)
 	} else {
-		_, err = s.txExec(ctx, tx, q, id, kind, actor, at, subject, note)
+		_, err = s.txExec(ctx, tx, q, act.ID, act.Kind, act.Actor, act.At, act.Subject, act.Note)
 	}
 	if err != nil {
-		return fmt.Errorf("ontologies: record %s: %w", kind, err)
+		return Act{}, fmt.Errorf("ontologies: record %s: %w", act.Kind, err)
 	}
-	return nil
+	return act, nil
 }

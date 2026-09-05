@@ -92,6 +92,51 @@ produced names that id in its provenance, and the row keeps its body — so a
 graph loaded under `sds@1` can still be asked what checked it, long after
 `sds@2` became current.
 
+## The ledger
+
+Four kinds of act reach one store, and one query answers all four.
+
+```sh
+curl -H "$K" 'http://127.0.0.1:47832/athanor/decisions?limit=20'
+curl -H "$K" 'http://127.0.0.1:47832/athanor/decisions?kind=load'
+curl -H "$K" 'http://127.0.0.1:47832/athanor/decisions?kind=review&actor=liliang'
+curl -H "$K" 'http://127.0.0.1:47832/athanor/decisions/decision:athanor:load:<job>:<load>'
+```
+
+A load records who put which job's graph into the brain, as which name, with
+the report's counts. A review decision records who accepted, rejected or
+edited which finding, with the note they wrote — recorded from an interceptor
+placed after authorization, so nothing unauthorized is ever recorded. Every
+ontology act is mirrored as `ontology.draft`, `ontology.propose`,
+`ontology.approve`, `ontology.publish`, `ontology.retire`; the two tables in
+`pkg/ontologies` stay the source of truth for the workflow and the ledger is
+the audit view. An agent's own `decision_record` over MCP or gRPC has been
+landing in the same store since CortexDB v2.98.0, and shows up beside them on
+the front page.
+
+The actor is always the **key id** — the identity the policy knows and an
+operator can revoke. A free-text `by` (alchemy's `ReviewDecision.by`, an
+ontology approval's `by`) is a name nobody checked; it is kept verbatim in the
+entry's note, so `_by` says which credential acted, the note says who claimed
+to, and a disagreement between them is itself in the record.
+
+Entry ids are deterministic in the act — `decision:athanor:load:<job>:<load>`,
+`decision:athanor:review:<job>:<item>` — so re-running a load updates one entry
+rather than growing a second, and a load can name the review decisions that
+unblocked it as its own premises without a search. `GET
+/athanor/decisions/{id}` is that chain, with each premise's grade and source.
+
+A ledger write that fails never undoes the act it describes: a load that
+succeeded answers 200 with `ledger_error` beside the report, and says so in
+the log.
+
+Reads take any key from the policy. A key confined to a `user_id` sees only
+the entries it signed, and a chain whose root was signed by somebody else
+answers exactly as one that does not exist — no status and no wording tells the
+two apart. The pipeline itself is still unconfined: a job could be owned, but a
+source id could not without alchemy's spool carrying an owner, and a
+confinement with a hole in it reads as a guarantee.
+
 ## What is where
 
 | | |
@@ -109,9 +154,10 @@ and neither depends on it.
 
 ## Next
 
-Decision ledger; a general rule engine; point-in-time snapshots. In that
-order — see the spec. Ontology propose → approve → publish is done, and its
-acts are shaped to become the ledger's second kind of entry.
+A general rule engine; point-in-time snapshots. In that order — see the spec.
+The decision ledger is done: loads, review decisions and ontology acts are all
+entries, and row confinement is closed on the ledger's own routes and open on
+the pipeline, for the reason `pkg/server/auth.go` gives.
 
 ## License
 

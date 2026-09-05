@@ -46,6 +46,7 @@ type Server struct {
 	describe string
 
 	alchemy *service.Server
+	ledger  ledger
 	metrics *observability.Registry
 	grpc    *grpc.Server
 	mux     *http.ServeMux
@@ -113,15 +114,18 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 
 	s := &Server{
 		opts: opts, db: db, keys: keys, internal: internal,
-		describe: opts.DBPath, alchemy: svc, metrics: metrics,
+		describe: opts.DBPath, alchemy: svc, ledger: brainLedger{db: db}, metrics: metrics,
 		grpcAddrReady: make(chan struct{}),
 	}
 
 	// One listener, two services, one policy. Metrics wrap authorization so
 	// denials are counted — the lesson CortexDB's own server learned.
+	// The ledger hooks come last in each chain, after authorization: an act
+	// nobody was allowed to perform is never recorded, and the actor an entry
+	// carries is the key the policy resolved (ledger_hooks.go).
 	s.grpc = grpc.NewServer(
-		grpc.ChainUnaryInterceptor(rpcserver.MetricsInterceptor(metrics), s.unaryAuth()),
-		grpc.ChainStreamInterceptor(s.streamAuth()),
+		grpc.ChainUnaryInterceptor(rpcserver.MetricsInterceptor(metrics), s.unaryAuth(), s.ledgerUnary()),
+		grpc.ChainStreamInterceptor(s.streamAuth(), s.ledgerStream()),
 	)
 	alchemyv1.RegisterAlchemyServer(s.grpc, svc)
 	backupDir := opts.BackupDir
@@ -158,6 +162,12 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux.HandleFunc("/athanor/ontologies", s.handleOntologies)
 	mux.HandleFunc("/athanor/ontologies/current", s.handleOntologyCurrent)
 	mux.HandleFunc("/athanor/ontologies/{id}", s.handleOntologyVersion)
+	// The ledger: what this server did, and why. Reads only — an entry is
+	// written by performing the act it describes (ledger.go). The id pattern
+	// takes the rest of the path because a decision id carries colons and a
+	// load name is the caller's own string.
+	mux.HandleFunc("/athanor/decisions", s.handleDecisions)
+	mux.HandleFunc("/athanor/decisions/{id...}", s.handleDecisionChain)
 	mux.Handle("/metrics", s.requireKey(metrics.Handler()))
 	mux.Handle("/debug/vars", s.requireKey(expvar.Handler()))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })

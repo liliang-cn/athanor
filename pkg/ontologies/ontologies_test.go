@@ -121,7 +121,7 @@ func TestTheChainFromADraftToAPublishedExtension(t *testing.T) {
 				t.Fatalf("the proposal did not survive the round trip: %+v", back)
 			}
 
-			if _, _, err := s.Publish(ctx, v1, "liliang", ""); err != nil {
+			if _, _, err := s.Publish(ctx, v1, ontologies.Publication{By: "liliang"}); err != nil {
 				t.Fatalf("publish %s: %v", v1, err)
 			}
 
@@ -146,7 +146,7 @@ func TestTheChainFromADraftToAPublishedExtension(t *testing.T) {
 				t.Fatalf("approving changed what is current: %v %+v", err, cur)
 			}
 
-			published, retired, err := s.Publish(ctx, v2, "liliang", "in force")
+			published, retired, err := s.Publish(ctx, v2, ontologies.Publication{By: "liliang", Note: "in force"})
 			if err != nil {
 				t.Fatalf("publish %s: %v", v2, err)
 			}
@@ -215,10 +215,10 @@ func TestTwoLineagesPublishIndependently(t *testing.T) {
 			if _, err := s.Draft(ctx, codeDoc, "operator", ""); err != nil {
 				t.Fatalf("draft %s: %v", two, err)
 			}
-			if _, retired, err := s.Publish(ctx, one+"@1", "liliang", ""); err != nil || retired != "" {
+			if _, retired, err := s.Publish(ctx, one+"@1", ontologies.Publication{By: "liliang"}); err != nil || retired != "" {
 				t.Fatalf("publish %s@1: %v (retired %q)", one, err, retired)
 			}
-			if _, retired, err := s.Publish(ctx, two+"@1", "liliang", ""); err != nil || retired != "" {
+			if _, retired, err := s.Publish(ctx, two+"@1", ontologies.Publication{By: "liliang"}); err != nil || retired != "" {
 				t.Fatalf("publishing %s@1 touched another lineage: %v (retired %q)", two, err, retired)
 			}
 			for _, ln := range []string{one, two} {
@@ -232,7 +232,7 @@ func TestTwoLineagesPublishIndependently(t *testing.T) {
 			if _, err := s.Draft(ctx, ext, "operator", ""); err != nil {
 				t.Fatalf("draft %s@2: %v", two, err)
 			}
-			if _, retired, err := s.Publish(ctx, two+"@2", "liliang", ""); err != nil || retired != two+"@1" {
+			if _, retired, err := s.Publish(ctx, two+"@2", ontologies.Publication{By: "liliang"}); err != nil || retired != two+"@1" {
 				t.Fatalf("publish %s@2: %v (retired %q)", two, err, retired)
 			}
 			if cur, err := s.Current(ctx, one); err != nil || cur.ID != one+"@1" {
@@ -289,13 +289,13 @@ func TestTheRefusals(t *testing.T) {
 			if _, err := s.Approve(ctx, v1, ontologies.Approval{Accept: []string{"member_of"}, By: "liliang"}); err == nil {
 				t.Fatal("a relation was declared against an undeclared end")
 			}
-			if _, _, err := s.Publish(ctx, v1, "", ""); !errors.Is(err, ontologies.ErrUnsigned) {
+			if _, _, err := s.Publish(ctx, v1, ontologies.Publication{By: ""}); !errors.Is(err, ontologies.ErrUnsigned) {
 				t.Fatalf("an unsigned publication was accepted: %v", err)
 			}
-			if _, _, err := s.Publish(ctx, v1, "liliang", ""); err != nil {
+			if _, _, err := s.Publish(ctx, v1, ontologies.Publication{By: "liliang"}); err != nil {
 				t.Fatalf("publish: %v", err)
 			}
-			if _, _, err := s.Publish(ctx, v1, "liliang", ""); !errors.Is(err, ontologies.ErrState) {
+			if _, _, err := s.Publish(ctx, v1, ontologies.Publication{By: "liliang"}); !errors.Is(err, ontologies.ErrState) {
 				t.Fatalf("the current version was published twice: %v", err)
 			}
 		})
