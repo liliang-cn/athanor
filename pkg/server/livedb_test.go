@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/liliang-cn/athanor/pkg/livedb"
 	"github.com/liliang-cn/cortexdb/v2/pkg/authz"
@@ -55,6 +56,82 @@ type livedbFake struct {
 	note   string
 	id     string
 	query  livedb.ListQuery
+
+	// block, when set, holds Run until it is closed or the run's context
+	// ends, and runErr is what it answers when it is let go.
+	//
+	// A follow is a Run that does not return until its context does, so this
+	// is what gives one a lifetime a test can take away — and what lets a
+	// test watch a follow be cancelled rather than infer it. runErr is
+	// separate from err because a follow's start reads the plan through Get
+	// first: one field for both would make a failing follow into a failing
+	// lookup, and the follow would never be launched at all.
+	block  chan struct{}
+	inRun  chan struct{}
+	outRun chan struct{}
+	runErr error
+}
+
+// holdRuns makes every later Run block until releaseRuns, its context ending,
+// or the test's patience. The two channels are buffered because a test may
+// stop watching a follow it has already proved something about.
+func (f *livedbFake) holdRuns() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.block = make(chan struct{})
+	f.inRun = make(chan struct{}, 8)
+	f.outRun = make(chan struct{}, 8)
+}
+
+func (f *livedbFake) releaseRuns() {
+	f.mu.Lock()
+	block := f.block
+	f.block = nil
+	f.mu.Unlock()
+	if block != nil {
+		close(block)
+	}
+}
+
+// awaitRun waits for a held Run to be entered, and awaitRunReturn for one to
+// return. Both fail the test rather than hang for ever.
+func (f *livedbFake) awaitRun(t *testing.T) {
+	t.Helper()
+	f.mu.Lock()
+	in := f.inRun
+	f.mu.Unlock()
+	select {
+	case <-in:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no run was ever started")
+	}
+}
+
+func (f *livedbFake) awaitRunReturn(t *testing.T) {
+	t.Helper()
+	f.mu.Lock()
+	out := f.outRun
+	f.mu.Unlock()
+	select {
+	case <-out:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the run never returned")
+	}
+}
+
+// runReturned reports whether a held Run has already returned, without
+// waiting. It is how the shutdown test tells cancelling from waiting: after
+// Close, the goroutine must be finished, not merely told to finish.
+func (f *livedbFake) runReturned() bool {
+	f.mu.Lock()
+	out := f.outRun
+	f.mu.Unlock()
+	select {
+	case <-out:
+		return true
+	default:
+		return false
+	}
 }
 
 func (f *livedbFake) note_(ctx context.Context, call string) {
@@ -125,8 +202,25 @@ func (f *livedbFake) Run(ctx context.Context, req livedb.RunRequest, actor strin
 	f.note_(ctx, "run")
 	f.mu.Lock()
 	f.run, f.runBy = req, actor
+	block, in, out := f.block, f.inRun, f.outRun
+	report, err, runErr := f.report, f.err, f.runErr
 	f.mu.Unlock()
-	return f.report, f.err
+	if block != nil {
+		if in != nil {
+			in <- struct{}{}
+		}
+		select {
+		case <-block:
+		case <-ctx.Done():
+		}
+		if out != nil {
+			defer func() { out <- struct{}{} }()
+		}
+	}
+	if runErr != nil {
+		return livedb.RunReport{}, runErr
+	}
+	return report, err
 }
 
 func (f *livedbFake) Runs(ctx context.Context, planID string, limit int) ([]livedb.RunReport, error) {
@@ -466,6 +560,14 @@ func (l *spyLedger) record(_ context.Context, entry ledgerEntry) (cortexdb.Decis
 	return cortexdb.DecisionRecord{ID: cortexdb.DecisionID(entry.ID)}, nil
 }
 
+// seen is the entries so far. A copy under the lock, because a background
+// follow records its own ending from a goroutine of its own.
+func (l *spyLedger) seen() []ledgerEntry {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]ledgerEntry(nil), l.entries...)
+}
+
 // A proposal and its signature are one entry that changes its verdict; a run
 // is its own entry, resting on the plan's. The actor is the key throughout,
 // including when the body names somebody else.
@@ -606,13 +708,18 @@ func TestALivedbHandlerCarriesTheKeyItAuthorized(t *testing.T) {
 }
 
 // Follow over HTTP would run until the connection dropped. The door says so
-// rather than accepting a flag it cannot honour.
+// rather than accepting a flag it cannot honour — and it says where the door
+// that can honour it is, because a refusal with nowhere to go is how a caller
+// concludes the product cannot do the thing at all.
 func TestALivedbRunRefusesToFollowOverHTTP(t *testing.T) {
 	h, f := livedbHarness(t)
 	code, body := h.do(http.MethodPost, "/athanor/livedb/runs", "op-secret",
 		`{"plan":"plan-1","dsn":"`+livedbDSN+`","follow":true}`)
 	if code != http.StatusBadRequest {
 		t.Fatalf("follow answered %d, want 400: %s", code, body)
+	}
+	if !strings.Contains(body, "/athanor/livedb/follows") {
+		t.Errorf("the refusal does not name the route that does follow: %s", body)
 	}
 	if calls := f.seen(); len(calls) != 0 {
 		t.Fatalf("the store was asked to follow anyway: %v", calls)

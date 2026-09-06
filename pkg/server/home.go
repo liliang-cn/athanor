@@ -89,6 +89,10 @@ what was signed. Nothing reads a row until somebody has signed for what leaves t
 <p class="muted">There is no form here. The connection string is a password and this page would carry it through a redirect,
 a browser history and this server's own notice — so a run is made with a bearer key or not at all. The plan keeps the redacted
 form of the string; the credential is supplied again on every run and is never stored, never shown and never in the ledger.</p>
+<p class="muted">Keeping the brain in step with the database afterwards is a job rather than a request:
+<code>POST /athanor/livedb/follows {"plan": "…", "dsn": "…"}</code> starts one under the same signed plan, <code>GET</code> the same path
+says what is running, and <code>DELETE /athanor/livedb/follows/{id}</code> stops it. The credential is held in this server's memory
+for the life of the follow and nowhere else, so a restart does not resume one and somebody supplies it again.</p>
 
 {{if .Notice}}<p>{{.Notice}}</p>{{end}}
 {{end}}

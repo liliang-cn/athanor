@@ -46,6 +46,11 @@ import (
 // that answers differently for "not on the list" and "I could not read that
 // DSN" is a list a caller can enumerate.
 
+// Following — keeping the brain in step with the source after the first pass
+// — is not here. It is a background job with a lifetime of its own rather
+// than a request, and it lives in livedb_follows.go for that reason; what
+// this file does about it is refuse the flag and say where the door is.
+
 // livedbStore is the half of *livedb.Store these handlers use.
 //
 // It is an interface because pkg/server should not be welded to a concrete
@@ -392,7 +397,14 @@ func (s *Server) handleLivedbRuns(w http.ResponseWriter, r *http.Request) {
 			// drops, then stop". That is not what the field means, and a door
 			// that accepts a flag it cannot honour is worse than one that
 			// says it cannot.
-			httpError(w, http.StatusBadRequest, "follow is not available over HTTP: it runs until its context ends, which here means until the connection drops")
+			//
+			// The capability is reachable, though: a follow is a job this
+			// server owns rather than a request somebody holds open, and it
+			// has its own routes (livedb_follows.go). This refusal names them,
+			// because a flag refused with nowhere to go is how a caller
+			// concludes the product cannot do it.
+			httpError(w, http.StatusBadRequest, "follow is not a flag on a run: it runs until its context ends, which here means until the connection drops. "+
+				"POST /athanor/livedb/follows to start one as a background job this server owns, GET it for what is running, and DELETE /athanor/livedb/follows/{id} to stop one")
 			return
 		}
 		if !s.livedbMayDial(w, dsn) {

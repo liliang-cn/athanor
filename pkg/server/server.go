@@ -53,12 +53,19 @@ type Server struct {
 	// halves of what those handlers face — a working store, and a store that
 	// could not be built — without either depending on how far pkg/livedb's
 	// own implementation has got.
-	liveDB  func() (livedbStore, error)
-	metrics *observability.Registry
-	grpc    *grpc.Server
-	mux     *http.ServeMux
-	http    *http.Server
-	view    *liveview.Server
+	liveDB func() (livedbStore, error)
+	// follows are the background live-database follows this server is
+	// running, and followCtx is what they run under: the server's own
+	// context, so that the request which started one may end without ending
+	// it (livedb_follows.go). stopFollows ends every one of them.
+	follows     *livedbFollowSet
+	followCtx   context.Context
+	stopFollows context.CancelFunc
+	metrics     *observability.Registry
+	grpc        *grpc.Server
+	mux         *http.ServeMux
+	http        *http.Server
+	view        *liveview.Server
 
 	gatewayConn   *grpc.ClientConn
 	stopGateway   context.CancelFunc
@@ -122,8 +129,9 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	s := &Server{
 		opts: opts, db: db, keys: keys, internal: internal,
 		describe: opts.DBPath, alchemy: svc, ledger: brainLedger{db: db}, metrics: metrics,
-		grpcAddrReady: make(chan struct{}),
+		grpcAddrReady: make(chan struct{}), follows: newLivedbFollowSet(),
 	}
+	s.followCtx, s.stopFollows = context.WithCancel(ctx)
 
 	// One listener, two services, one policy. Metrics wrap authorization so
 	// denials are counted — the lesson CortexDB's own server learned.
@@ -178,6 +186,11 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux.HandleFunc("/athanor/livedb/plans/{id}", s.handleLivedbPlan)
 	mux.HandleFunc("/athanor/livedb/plans/{id}/signature", s.handleLivedbSignature)
 	mux.HandleFunc("/athanor/livedb/runs", s.handleLivedbRuns)
+	// Keeping the brain in step with the database afterwards is a job this
+	// server owns rather than a request somebody holds open, so it is a
+	// resource with a lifetime and not a flag on a run (livedb_follows.go).
+	mux.HandleFunc("/athanor/livedb/follows", s.handleLivedbFollows)
+	mux.HandleFunc("/athanor/livedb/follows/{id}", s.handleLivedbFollow)
 	// The ledger: what this server did, and why. Reads only — an entry is
 	// written by performing the act it describes (ledger.go). The id pattern
 	// takes the rest of the path because a decision id carries colons and a
@@ -263,6 +276,9 @@ func (s *Server) Addrs() (grpcAddr, httpAddr string) {
 }
 
 func (s *Server) shutdown() {
+	// Before the listeners, so that nothing new starts one, and before the
+	// brain is closed either here or in Close.
+	s.stopFollowing()
 	if s.http != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		_ = s.http.Shutdown(ctx)
@@ -279,6 +295,10 @@ func (s *Server) shutdown() {
 
 // Close releases what New opened. Serve's shutdown handles the listeners.
 func (s *Server) Close() error {
+	// Again, because a Server that never reached Serve still started what it
+	// started. It is idempotent, and it is what makes closing the brain below
+	// safe: a follow writes into it.
+	s.stopFollowing()
 	s.alchemy.Close()
 	if s.view != nil {
 		_ = s.view.Close()

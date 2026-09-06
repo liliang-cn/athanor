@@ -74,7 +74,8 @@ import (
 // `decision:athanor:review:<job>:<item>`, an ontology act's is
 // `decision:athanor:ontology:<act id>`, and a live-database plan's is
 // `decision:athanor:livedb:plan:<plan>` with its runs at
-// `decision:athanor:livedb:run:<run>`. RecordDecision treats a supplied id
+// `decision:athanor:livedb:run:<run>` and the background follows that keep it
+// in step at `decision:athanor:livedb:follow:<follow>`. RecordDecision treats a supplied id
 // as an upsert, so re-running a load under the same name updates one entry
 // rather than growing a second — the same property that lets an agent replay
 // a transcript without doubling its ledger. It is also what lets a load find
@@ -96,7 +97,13 @@ func reviewDecisionID(job, item string) string { return "athanor:review:" + job 
 func ontologyDecisionID(actID string) string   { return "athanor:ontology:" + actID }
 func livedbPlanDecisionID(plan string) string  { return "athanor:livedb:plan:" + plan }
 func livedbRunDecisionID(run string) string    { return "athanor:livedb:run:" + run }
-func ledgerTrim(s string) string               { return strings.TrimSpace(s) }
+
+// livedbFollowDecisionID names one background follow. Its own entry rather
+// than an update to the plan's, because a plan may be followed, stopped and
+// followed again, and one entry covering all of that would lose every ending
+// but the last.
+func livedbFollowDecisionID(follow string) string { return "athanor:livedb:follow:" + follow }
+func ledgerTrim(s string) string                  { return strings.TrimSpace(s) }
 
 // ledgerEntry is one act of Athanor's, in the shape RecordDecision takes.
 type ledgerEntry struct {
@@ -309,6 +316,16 @@ func (l livedbLedger) Record(ctx context.Context, act livedb.Act) error {
 	case livedb.ActRun:
 		id, verdict = livedbRunDecisionID(subject), "ran"
 		note = fmt.Sprintf("ran the import %s: %s", subject, act.Note)
+	// The two acts pkg/livedb does not know about: a follow is a background
+	// job this server owns rather than anything the store has a word for
+	// (livedb_follows.go), and it is recorded here so that it sits in the
+	// same series as the run it extends.
+	case livedbActFollow:
+		id, verdict = livedbFollowDecisionID(subject), "following"
+		note = fmt.Sprintf("started following %s: %s", subject, act.Note)
+	case livedbActUnfollow:
+		id, verdict = livedbFollowDecisionID(subject), "stopped"
+		note = fmt.Sprintf("stopped following %s: %s", subject, act.Note)
 	default:
 		return fmt.Errorf("athanor: ledger: %s is not one of this package's acts", act.Kind)
 	}
@@ -344,7 +361,10 @@ func (l livedbLedger) Record(ctx context.Context, act livedb.Act) error {
 // premise that was never recorded costs one premise and not the whole entry.
 func livedbPremises(act livedb.Act) []string {
 	ids := make([]string, 0, len(act.Premises)+1)
-	if act.Kind == livedb.ActRun {
+	switch act.Kind {
+	// A run and a follow both rest on the signature that permitted them, and
+	// both name it the same way: by the plan's id, which is a subject.
+	case livedb.ActRun, livedbActFollow, livedbActUnfollow:
 		for _, subject := range act.Premises {
 			if subject = ledgerTrim(subject); subject != "" {
 				ids = append(ids, livedbPlanDecisionID(subject))
@@ -355,7 +375,7 @@ func livedbPremises(act livedb.Act) []string {
 				ids = append(ids, livedbPlanDecisionID(ledgerTrim(plan)))
 			}
 		}
-	} else {
+	default:
 		ids = append(ids, act.Premises...)
 	}
 
