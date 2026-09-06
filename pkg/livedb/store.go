@@ -99,7 +99,7 @@ func (s *storeImpl) txQueryRow(ctx context.Context, tx *sql.Tx, q string, args .
 // planColumns is the one place the column order is decided; scanPlan reads it
 // back. Written out rather than SELECT *, so a column added later cannot
 // silently shift what a scan lands in.
-const planColumns = `id, source_key, driver, redacted, db_schema, tables, treatments, text_scan,
+const planColumns = `id, source_key, driver, redacted, db_schema, tables, treatments,
 	hash, state, counts, created_by, created_at, signed_by, signed_at, sign_act, supersedes, note`
 
 type rowScanner interface{ Scan(dest ...any) error }
@@ -107,14 +107,6 @@ type rowScanner interface{ Scan(dest ...any) error }
 // storedPlan is the row plus the two fields the frozen Plan has no home for.
 type storedPlan struct {
 	Plan
-	// textScan is ProposeOptions.ScanText's result. Treatment has no field
-	// for it and Plan.Masking is a pure function of Plan, so a text-scan rule
-	// cannot survive into the exported rendering. It survives here instead,
-	// and run() puts it back on the plan the desensitizer is actually built
-	// from — because a scan only ever removes more, and dropping it would
-	// mean an operator who asked for free-text scanning silently did not get
-	// it.
-	textScan []connector.TextScanRule
 	// signAct is the ledger id of the signature. A run names it as its
 	// premise, which is what makes "where did this node come from" walk back
 	// to somebody's name.
@@ -126,14 +118,13 @@ func scanPlan(r rowScanner) (storedPlan, error) {
 		p          storedPlan
 		tables     string
 		treatments string
-		textScan   string
 		counts     string
 		state      string
 		signedAt   sql.NullTime
 	)
 	if err := r.Scan(
 		&p.ID, &p.SourceKey, &p.Source.Driver, &p.Source.Redacted, &p.Source.Schema,
-		&tables, &treatments, &textScan, &p.Hash, &state, &counts,
+		&tables, &treatments, &p.Hash, &state, &counts,
 		&p.CreatedBy, &p.CreatedAt, &p.SignedBy, &signedAt, &p.signAct, &p.Supersedes, &p.Note,
 	); err != nil {
 		return storedPlan{}, err
@@ -142,7 +133,7 @@ func scanPlan(r rowScanner) (storedPlan, error) {
 	for _, d := range []struct {
 		raw string
 		to  any
-	}{{tables, &p.Source.Tables}, {treatments, &p.Columns}, {textScan, &p.textScan}, {counts, &p.Counts}} {
+	}{{tables, &p.Source.Tables}, {treatments, &p.Columns}, {counts, &p.Counts}} {
 		if d.raw == "" {
 			continue
 		}

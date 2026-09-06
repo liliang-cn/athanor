@@ -51,9 +51,6 @@ import (
 	"github.com/liliang-cn/cortexdb/v2/pkg/importflow"
 )
 
-// ErrNotImplemented marks a stub in the frozen API skeleton.
-var ErrNotImplemented = errors.New("livedb: not implemented")
-
 // Errors callers distinguish. They are values rather than strings because the
 // HTTP layer maps each to a different status, and a status decided by string
 // matching is a status that changes when somebody edits a message.
@@ -170,6 +167,19 @@ type Treatment struct {
 	// the case where a reviewer must be able to see the classifier was wrong.
 	Sample string `json:"sample,omitempty"`
 	Enters string `json:"enters,omitempty"`
+
+	// Scan marks the column for free-text PII scanning on top of the
+	// column-level treatment: the value is kept, and anything inside it that
+	// reads like a phone number or an address is masked in place.
+	//
+	// It is on the treatment rather than in a list beside it so that the plan
+	// a person reads and the plan the desensitizer is built from are one
+	// object. A scan rule that lived only in a side table would be invisible
+	// to Masking(), which is the rendering an auditor reads — and a review
+	// screen that shows less than what ran is the failure this whole package
+	// exists to prevent. It is hashed for the same reason: it changes what
+	// leaves the database, so it is part of what was signed.
+	Scan bool `json:"scan,omitempty"`
 }
 
 // Counts is the plan in one line, the summary the review screen leads with.
@@ -311,8 +321,14 @@ type Act struct {
 	Subject string         `json:"subject"`
 	Note    string         `json:"note,omitempty"`
 	Detail  map[string]any `json:"detail,omitempty"`
-	// Premises are ledger entry ids this act rests on. A run rests on the
-	// signature that permitted it.
+	// Premises are the SUBJECTS of the acts this one rests on — a run rests
+	// on its plan, so a run's premise is the plan's id.
+	//
+	// Subjects rather than entry ids because this package does not know how
+	// the ledger numbers its entries, and an id invented here to look like
+	// one would be a premise that can never resolve. The ledger keys its
+	// entries by subject already, so translating a subject into the entry
+	// that holds it is one call on the side that owns the numbering.
 	Premises []string `json:"premises,omitempty"`
 }
 

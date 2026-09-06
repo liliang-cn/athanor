@@ -59,7 +59,7 @@ func (s *storeImpl) propose(ctx context.Context, src Source, opts ProposeOptions
 		return Plan{}, fmt.Errorf("livedb: classify: %w", err)
 	}
 
-	p := storedPlan{textScan: mp.TextScan}
+	p := storedPlan{}
 	p.Source = src.resolved(tables)
 	p.SourceKey = p.Source.Key()
 	p.Columns = treatmentsFor(schemas, mp)
@@ -117,6 +117,7 @@ func treatmentsFor(schemas []importflow.Schema, mp connector.MaskingPlan) []Trea
 				Reason: rule.Reason, By: firstNamed(rule.Source, "rule"),
 				Sample: sampleValue(rule.PiiKind, raw),
 				Enters: entersValue(rule.PiiKind, rule.Action, raw),
+				Scan:   mp.TextScanFor(sc.Table, col.Name),
 			})
 		}
 	}
@@ -244,6 +245,7 @@ type canonicalTreatment struct {
 	Kind        connector.PiiKind     `json:"pii_kind"`
 	Sensitivity connector.Sensitivity `json:"sensitivity"`
 	Action      connector.MaskAction  `json:"action"`
+	Scan        bool                  `json:"scan"`
 }
 
 // planHash is what a signature names, and what makes "I signed this"
@@ -263,6 +265,7 @@ func planHash(p Plan) string {
 		c.Columns = append(c.Columns, canonicalTreatment{
 			Table: t.Table, Column: t.Column, Type: t.Type,
 			Kind: t.Kind, Sensitivity: t.Sensitivity, Action: t.Action,
+			Scan: t.Scan,
 		})
 	}
 	body, err := json.Marshal(c)
@@ -279,15 +282,14 @@ func planHash(p Plan) string {
 func (s *storeImpl) insertPlan(ctx context.Context, p storedPlan) error {
 	tables, _ := json.Marshal(p.Source.Tables)
 	treatments, _ := json.Marshal(p.Columns)
-	textScan, _ := json.Marshal(p.textScan)
 	counts, _ := json.Marshal(p.Counts)
 	const q = `INSERT INTO athanor_livedb_plans
-		(id, source_key, driver, redacted, db_schema, tables, treatments, text_scan,
+		(id, source_key, driver, redacted, db_schema, tables, treatments,
 		 hash, state, counts, created_by, created_at, signed_by, signed_at, sign_act, supersedes, note)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, '', '', ?)`
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', NULL, '', '', ?)`
 	if _, err := s.exec(ctx, q,
 		p.ID, p.SourceKey, p.Source.Driver, p.Source.Redacted, p.Source.Schema,
-		string(tables), string(treatments), string(textScan),
+		string(tables), string(treatments),
 		p.Hash, string(p.State), string(counts), p.CreatedBy, p.CreatedAt, p.Note,
 	); err != nil {
 		return fmt.Errorf("livedb: write draft %s: %w", p.ID, err)
@@ -472,6 +474,9 @@ func maskingPlan(p Plan) connector.MaskingPlan {
 			Sensitivity: t.Sensitivity, Action: t.Action,
 			Reason: t.Reason, Source: t.By,
 		})
+		if t.Scan {
+			mp.TextScan = append(mp.TextScan, connector.TextScanRule{Table: t.Table, Column: t.Column})
+		}
 	}
 	if p.State == Signed {
 		mp.Sign(p.SignedBy, p.SignedAt)

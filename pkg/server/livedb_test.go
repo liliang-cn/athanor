@@ -33,12 +33,11 @@ func runBody(dsn string) string {
 
 // livedbFake is the store the routes are tested against.
 //
-// pkg/livedb's implementation is being written elsewhere and every method of
-// the real store answers ErrNotImplemented today, so testing through it would
-// test nothing. The handlers depend on the livedbStore interface instead,
-// which is better design in its own right — pkg/server has no business
-// knowing which concrete store it holds — and it is what lets each of the
-// store's documented refusals be produced on demand here.
+// The handlers depend on the livedbStore interface rather than the concrete
+// store — pkg/server has no business knowing which one it holds — and that is
+// what lets each of the store's documented refusals be produced on demand
+// here. Reaching the real store would need a live Postgres to refuse
+// anything, which would make this file a test of the network.
 type livedbFake struct {
 	mu     sync.Mutex
 	plan   livedb.Plan
@@ -488,7 +487,7 @@ func TestTheLivedbLedgerRecordsOnePlanEntryAndOneRunEntry(t *testing.T) {
 		{ID: "act_bbb", Kind: livedb.ActSign, Actor: "liliang", Subject: "plan-1", Note: "read it"},
 		{ID: "act_ccc", Kind: livedb.ActRun, Actor: "liliang", Subject: "run-9", Note: "1200 rows",
 			Detail:   map[string]any{"plan": "plan-1", "rows_read": 1200},
-			Premises: []string{"act_bbb"}},
+			Premises: []string{"plan-1"}},
 	}
 	for _, act := range acts {
 		if err := mirror.Record(ctx, act); err != nil {
@@ -528,10 +527,9 @@ func TestTheLivedbLedgerRecordsOnePlanEntryAndOneRunEntry(t *testing.T) {
 		t.Errorf("a proposal by the key itself invented a second name: %+v", propose.Detail)
 	}
 	// A run rests on the signature that permitted it — which is the plan's
-	// entry, named through the run's own detail, and prefixed the way
-	// loads.go prefixes the review decisions a load rests on. The signing
-	// act's id rides along and is dropped downstream by the brain, which
-	// holds no entry under it.
+	// entry. livedb names it by subject, this side turns the subject into the
+	// entry id and prefixes it the way loads.go prefixes the review decisions
+	// a load rests on.
 	if !contains(run.Premises, "decision:athanor:livedb:plan:plan-1") {
 		t.Errorf("the run does not rest on its signature's entry: %v", run.Premises)
 	}

@@ -331,27 +331,33 @@ func (l livedbLedger) Record(ctx context.Context, act livedb.Act) error {
 //
 // A run rests on the signature that permitted it, so that "where did this
 // node come from" walks back to a signature and from there to the column it
-// was made of. Finding that entry needs one translation, because the two
-// packages number things differently: pkg/livedb offers the signing *act's*
-// own id, which is minted per act and is not an entry in anybody's ledger,
-// while the entry the signature actually wrote is the plan's —
-// athanor:livedb:plan:<plan>, the same one the proposal wrote and the
-// signature updated. A run's detail names its plan, so the entry is derived
-// from that rather than looked up.
+// was made of. One translation stands between the two packages: livedb offers
+// SUBJECTS, because it does not know how this ledger numbers its entries, and
+// an id invented over there to look like one would be a premise that can
+// never resolve. The subject of a run's premise is a plan, and the entry a
+// plan's signature wrote is athanor:livedb:plan:<plan> — the same entry the
+// proposal wrote and the signature updated.
 //
-// Whatever livedb did offer is passed through as well, prefixed the way
-// loads.go prefixes the review decisions a load rests on. An id that names no
-// entry costs nothing: brainLedger.existing drops the premises the brain does
-// not hold, so a premise that was never recorded costs one premise and not
-// the whole entry.
+// A run's detail also names its plan, and that is kept as the fallback for an
+// act that offers no premise at all. An id that names no entry costs nothing:
+// brainLedger.existing drops the premises the brain does not hold, so a
+// premise that was never recorded costs one premise and not the whole entry.
 func livedbPremises(act livedb.Act) []string {
 	ids := make([]string, 0, len(act.Premises)+1)
 	if act.Kind == livedb.ActRun {
-		if plan, _ := act.Detail["plan"].(string); ledgerTrim(plan) != "" {
-			ids = append(ids, livedbPlanDecisionID(ledgerTrim(plan)))
+		for _, subject := range act.Premises {
+			if subject = ledgerTrim(subject); subject != "" {
+				ids = append(ids, livedbPlanDecisionID(subject))
+			}
 		}
+		if len(ids) == 0 {
+			if plan, _ := act.Detail["plan"].(string); ledgerTrim(plan) != "" {
+				ids = append(ids, livedbPlanDecisionID(ledgerTrim(plan)))
+			}
+		}
+	} else {
+		ids = append(ids, act.Premises...)
 	}
-	ids = append(ids, act.Premises...)
 
 	out := make([]string, 0, len(ids))
 	seen := make(map[string]bool, len(ids))

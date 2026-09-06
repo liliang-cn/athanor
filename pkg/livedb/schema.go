@@ -38,7 +38,6 @@ CREATE TABLE IF NOT EXISTS athanor_livedb_plans (
 	db_schema  TEXT NOT NULL DEFAULT '',
 	tables     TEXT NOT NULL DEFAULT '[]',
 	treatments TEXT NOT NULL DEFAULT '[]',
-	text_scan  TEXT NOT NULL DEFAULT '[]',
 	hash       TEXT NOT NULL,
 	state      TEXT NOT NULL,
 	counts     TEXT NOT NULL DEFAULT '{}',

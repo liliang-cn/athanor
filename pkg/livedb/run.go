@@ -59,7 +59,7 @@ func (s *storeImpl) run(ctx context.Context, req RunRequest, actor string) (RunR
 	}
 	rep.Drift, rep.Gone = driftOf(p.Plan, schemas)
 
-	des, err := connector.NewDesensitizer(s.masking(p), connector.DesensitizerOptions{
+	des, err := connector.NewDesensitizer(maskingPlan(p.Plan), connector.DesensitizerOptions{
 		Tenant:      s.tenant,
 		KeyProvider: s.keys,
 		Vault:       s.vault,
@@ -137,9 +137,7 @@ func (s *storeImpl) run(ctx context.Context, req RunRequest, actor string) (RunR
 	// The run rests on the signature that permitted it, so "where did this
 	// node come from" walks back to a name and from there to the column it
 	// was made of.
-	if p.signAct != "" {
-		act.Premises = []string{p.signAct}
-	}
+	act.Premises = []string{p.ID}
 	_ = s.mirror(ctx, act)
 
 	if req.Follow {
@@ -148,15 +146,6 @@ func (s *storeImpl) run(ctx context.Context, req RunRequest, actor string) (RunR
 		}
 	}
 	return rep, nil
-}
-
-// masking is the plan the desensitizer is actually built from: the exported
-// rendering plus the free-text scan rules, which Treatment has no field for.
-// See storedPlan.textScan.
-func (s *storeImpl) masking(p storedPlan) connector.MaskingPlan {
-	mp := maskingPlan(p.Plan)
-	mp.TextScan = p.textScan
-	return mp
 }
 
 // driftOf compares the signed plan against the schema as it is now. Both lists

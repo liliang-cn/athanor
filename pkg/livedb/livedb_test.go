@@ -420,10 +420,10 @@ func TestTheCredentialReachesNeitherTheRowNorTheReply(t *testing.T) {
 // would have leaked through.
 func rowText(t *testing.T, h *harness, id string) string {
 	t.Helper()
-	const q = `SELECT id, source_key, driver, redacted, db_schema, tables, treatments, text_scan,
+	const q = `SELECT id, source_key, driver, redacted, db_schema, tables, treatments,
 		hash, state, counts, created_by, signed_by, sign_act, supersedes, note
 		FROM athanor_livedb_plans WHERE id = ?`
-	cols := make([]string, 16)
+	cols := make([]string, 15)
 	dest := make([]any, len(cols))
 	for i := range cols {
 		dest[i] = &cols[i]
@@ -867,8 +867,11 @@ func TestTheRunRestsOnTheSignature(t *testing.T) {
 	if len(runs) != 1 {
 		t.Fatalf("the ledger got %d runs", len(runs))
 	}
-	if got := runs[0].Premises; len(got) != 1 || got[0] != sign.ID {
-		t.Fatalf("the run should rest on the signature %s, got %v", sign.ID, got)
+	// A premise is a SUBJECT, not an act id: this package does not know how
+	// the ledger numbers its entries, and the subject the signature was about
+	// is the plan. The ledger turns that into the entry the signature wrote.
+	if got := runs[0].Premises; len(got) != 1 || got[0] != signed.ID {
+		t.Fatalf("the run should rest on the plan %s, got %v", signed.ID, got)
 	}
 	if runs[0].Actor != "job-7" {
 		t.Fatalf("the run's actor is %q", runs[0].Actor)
@@ -1049,5 +1052,58 @@ func TestDriftOfIsSortedAndByName(t *testing.T) {
 	}
 	if !sort.StringsAreSorted(drift) || !sort.StringsAreSorted(gone) {
 		t.Fatalf("both lists are sorted so two reports are comparable")
+	}
+}
+
+// A free-text scan is part of what was signed, so it has to survive into the
+// rendering an auditor reads.
+//
+// It used to live in a column beside the plan, which worked — the desensitizer
+// got it — and was wrong in the one way this package cannot afford: Masking()
+// is what an auditor reads back, and it rendered a plan with no scan rules on
+// a source that was being scanned. A review screen that shows less than what
+// ran is the failure the whole package exists to prevent.
+func TestAFreeTextScanIsOnThePlanAndInItsRendering(t *testing.T) {
+	plain := newHarness(t)
+	quiet, err := plain.store.Propose(context.Background(),
+		Source{Driver: "postgres", DSN: dsnLive}, ProposeOptions{By: "operator"})
+	if err != nil {
+		t.Fatalf("propose without scanning: %v", err)
+	}
+
+	h := newHarness(t)
+	scanned, err := h.store.Propose(context.Background(),
+		Source{Driver: "postgres", DSN: dsnLive}, ProposeOptions{By: "operator", ScanText: true})
+	if err != nil {
+		t.Fatalf("propose with scanning: %v", err)
+	}
+
+	var marked []string
+	for _, tr := range scanned.Columns {
+		if tr.Scan {
+			marked = append(marked, tr.Table+"."+tr.Column)
+		}
+	}
+	if len(marked) == 0 {
+		t.Fatalf("ScanText marked no column: %+v", scanned.Columns)
+	}
+
+	// The rendering the desensitizer is built from, and the one an auditor
+	// reads, are the same object — so the rules are in it.
+	mp := scanned.Masking()
+	if len(mp.TextScan) != len(marked) {
+		t.Fatalf("the rendering carries %d scan rules for %d marked columns: %+v",
+			len(mp.TextScan), len(marked), mp.TextScan)
+	}
+	for _, name := range marked {
+		table, column, _ := strings.Cut(name, ".")
+		if !mp.TextScanFor(table, column) {
+			t.Errorf("%s is marked on the plan and absent from its rendering", name)
+		}
+	}
+
+	// And it changed what leaves the database, so it changed what was signed.
+	if scanned.Hash == quiet.Hash {
+		t.Errorf("scanning did not move the hash, so a plan could gain it after a signature")
 	}
 }
