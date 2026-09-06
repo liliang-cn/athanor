@@ -4,17 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/liliang-cn/alchemy/pkg/alchemy"
+	"github.com/liliang-cn/athanor/internal/braintest"
 	"github.com/liliang-cn/athanor/pkg/ontologies"
-	"github.com/liliang-cn/cortexdb/v2/pkg/cortexdb"
 )
 
 // seed is one lineage's first vocabulary. The lineage is a parameter because
@@ -28,11 +23,9 @@ func seed(lineage string) []byte {
 }
 
 // lineages are unique per run, for the same reason.
-var lineageSeq atomic.Int64
-
 func newLineage(t *testing.T) string {
 	t.Helper()
-	return fmt.Sprintf("l%d%d", time.Now().UnixNano()%1e9, lineageSeq.Add(1))
+	return braintest.Unique("l")
 }
 
 // proposed is what a run under `sds@1` came back wanting: a type the corpus
@@ -47,9 +40,10 @@ func proposed() []alchemy.Proposal {
 	}
 }
 
-// One suite, both backends. PostgreSQL is opt-in and its absence is said out
-// loud, CortexDB's rule: a parity suite that skips silently is a suite that
-// stops being run.
+// One suite, both backends. Which backends those are, and the loud complaint
+// when the PostgreSQL half is not covered, are internal/braintest's — shared
+// with pkg/livedb, which owns tables on the same handle and has the same
+// reason to care.
 type backend struct {
 	name  string
 	store *ontologies.Store
@@ -57,37 +51,18 @@ type backend struct {
 
 func backends(t *testing.T) []backend {
 	t.Helper()
-	out := []backend{{name: "sqlite", store: storeOn(t, filepath.Join(t.TempDir(), "brain.db"), "sqlite")}}
-	// Opt-in, and its absence is said out loud rather than skipped quietly:
-	// CortexDB's own rule, and the reason is that a parity suite nobody
-	// notices is not running is a suite that has stopped being a parity suite.
-	// Point it at a database this suite may create tables in; ids are unique
-	// per run (newLineage) so repeated runs do not collide.
-	dsn := os.Getenv("ATHANOR_TEST_POSTGRES")
-	if dsn == "" {
-		t.Log("ATHANOR_TEST_POSTGRES unset — PostgreSQL is NOT covered by this run")
-		return out
+	var out []backend
+	for _, b := range braintest.Backends(t) {
+		s, err := ontologies.New(b.Open(t))
+		if err != nil {
+			t.Fatalf("ontologies.New on %s: %v", b.Name, err)
+		}
+		if got := s.Dialect().Kind(); got != b.Kind {
+			t.Fatalf("the %s store speaks %s", b.Name, got)
+		}
+		out = append(out, backend{name: b.Name, store: s})
 	}
-	return append(out, backend{name: "postgres", store: storeOn(t, dsn, "postgres")})
-}
-
-func storeOn(t *testing.T, path, wantDialect string) *ontologies.Store {
-	t.Helper()
-	cfg := cortexdb.DefaultConfig(path)
-	cfg.Dimensions = 4
-	db, err := cortexdb.Open(cfg)
-	if err != nil {
-		t.Fatalf("open brain: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	s, err := ontologies.New(db)
-	if err != nil {
-		t.Fatalf("ontologies.New: %v", err)
-	}
-	if got := string(s.Dialect().Kind()); got != wantDialect {
-		t.Fatalf("dialect = %s, want %s", got, wantDialect)
-	}
-	return s
+	return out
 }
 
 func TestTheChainFromADraftToAPublishedExtension(t *testing.T) {
@@ -159,6 +134,21 @@ func TestTheChainFromADraftToAPublishedExtension(t *testing.T) {
 			old, err := s.Get(ctx, v1)
 			if err != nil || old.State != ontologies.Retired || old.RetiredAt == nil {
 				t.Fatalf("%s was not retired: %v %+v", v1, err, old)
+			}
+			// The version handed back by Publish and the row a later Get
+			// reads are the same version, timestamps included. They are not
+			// automatically: this store's clock is time.Now, which is
+			// nanoseconds, and PostgreSQL's TIMESTAMPTZ is microseconds — so
+			// without the truncation in Store.at the two would agree on
+			// SQLite and disagree on PostgreSQL, on the one field an auditor
+			// asking "when was this in force" reads.
+			back, err2 := s.Get(ctx, v2)
+			if err2 != nil {
+				t.Fatalf("get %s: %v", v2, err2)
+			}
+			if !back.CreatedAt.Equal(published.CreatedAt) || !back.PublishedAt.Equal(*published.PublishedAt) {
+				t.Fatalf("the timestamps did not round trip: %v/%v vs %v/%v",
+					back.CreatedAt, back.PublishedAt, published.CreatedAt, published.PublishedAt)
 			}
 			// Retired is not deleted. Every graph extracted under it names it
 			// in its provenance, and its body still answers what those facts

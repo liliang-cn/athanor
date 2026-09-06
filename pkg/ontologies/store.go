@@ -77,6 +77,17 @@ func (s *Store) txQueryRow(ctx context.Context, tx *sql.Tx, q string, args ...an
 	return tx.QueryRowContext(ctx, s.dialect.Rebind(q), args...)
 }
 
+// at is the clock, truncated to what both databases can hold.
+//
+// PostgreSQL's TIMESTAMPTZ resolves to microseconds and Go's time.Time to
+// nanoseconds, so a version published at .123456789 comes back from
+// PostgreSQL as .123456 and from SQLite unchanged — the Version returned by
+// Publish and the row a later Get reads would agree on one backend and not on
+// the other. Truncating where the value is minted makes them the same
+// everywhere. Nothing here is ordered at sub-microsecond resolution, and
+// where two timestamps do tie the id breaks it.
+func (s *Store) at() time.Time { return s.now().UTC().Truncate(time.Microsecond) }
+
 // versionColumns is the one place the column order is decided; scanVersion
 // reads it back. Written out rather than SELECT *, so a column added later
 // cannot silently shift what a scan lands in.

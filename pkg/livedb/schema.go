@@ -19,11 +19,17 @@ import (
 // column loses that on the way back. There is no BLOB, no AUTOINCREMENT and
 // no SERIAL: every primary key is a minted TEXT id.
 //
-// Two column names are deliberately not the obvious ones. `cursor` and
-// `position` are reserved in PostgreSQL and the DDL is a syntax error there;
-// `db_schema` rather than `schema` for the same reason one step short of
-// certainty. A reader wondering why the checkpoint table does not simply say
-// `cursor` is reading the answer.
+// Three column names are deliberately not the obvious ones: `cursor_json`,
+// `pos` and `db_schema` rather than `cursor`, `position` and `schema`. The
+// reason first written here was that PostgreSQL reserves all three and the
+// DDL would be a syntax error — which, checked against PostgreSQL 16 rather
+// than assumed, is not true: all three are col_name keywords and all three
+// are accepted as column names, in CREATE TABLE and in a SELECT list. The
+// names stay anyway. They are reserved in the SQL standard's sense and are
+// the kind of word a future backend, a migration tool or a hand-written
+// psql query does trip over, and renaming a column that already holds a
+// change stream's position is a worse day than not naming it `position`.
+// What is not true is that this was load-bearing.
 func schemaSQL(d sqldialect.Dialect) string {
 	ts := "DATETIME"
 	if d.Kind() == sqldialect.Postgres {

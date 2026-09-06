@@ -294,6 +294,19 @@ func (s *storeImpl) mirror(ctx context.Context, acts ...Act) error {
 	return nil
 }
 
+// at is the clock, truncated to what both databases can hold.
+//
+// PostgreSQL's TIMESTAMPTZ resolves to microseconds and Go's time.Time to
+// nanoseconds, so a plan signed at .123456789 comes back from PostgreSQL as
+// .123456 and from SQLite unchanged: the Plan returned by Sign and the row a
+// later Get reads would agree on one backend and not on the other, and the
+// caller most likely to compare them is an auditor asking whether the plan on
+// record is the plan somebody signed. Truncating where the value is minted
+// makes the answer the same everywhere and costs nothing anybody can observe
+// — nothing here is ordered at sub-microsecond resolution, and where two
+// timestamps do tie the id breaks it.
+func (s *storeImpl) at() time.Time { return s.now().UTC().Truncate(time.Microsecond) }
+
 // mintID names a plan, a run or an act. Not a sequence: a BIGSERIAL and an
 // INTEGER PRIMARY KEY AUTOINCREMENT are the one thing the two dialects cannot
 // be handed the same DDL for, and none of these needs its id to be ordered —
@@ -334,7 +347,7 @@ func (c checkpointStore) Save(ctx context.Context, sourceKey string, cp connecto
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT (source_key) DO UPDATE SET
 			cursor_json = excluded.cursor_json, pos = excluded.pos, updated_at = excluded.updated_at`
-	if _, err := c.s.exec(ctx, q, sourceKey, cp.Cursor, cp.Position, c.s.now()); err != nil {
+	if _, err := c.s.exec(ctx, q, sourceKey, cp.Cursor, cp.Position, c.s.at()); err != nil {
 		return fmt.Errorf("livedb: save checkpoint %s: %w", sourceKey, err)
 	}
 	return nil

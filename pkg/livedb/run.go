@@ -38,7 +38,7 @@ func (s *storeImpl) run(ctx context.Context, req RunRequest, actor string) (RunR
 		return RunReport{}, fmt.Errorf("%w: the credential describes %s, the plan was signed for %s", ErrWrongSource, key, p.SourceKey)
 	}
 
-	rep := RunReport{Plan: p.ID, SourceKey: p.SourceKey, DryRun: req.DryRun, StartedAt: s.now()}
+	rep := RunReport{Plan: p.ID, SourceKey: p.SourceKey, DryRun: req.DryRun, StartedAt: s.at()}
 	if rep.ID, err = mintID("run"); err != nil {
 		return RunReport{}, err
 	}
@@ -115,7 +115,7 @@ func (s *storeImpl) run(ctx context.Context, req RunRequest, actor string) (RunR
 			rep.Errors = append(rep.Errors, out.UnparsedStatements...)
 		}
 	}
-	rep.EndedAt = s.now()
+	rep.EndedAt = s.at()
 
 	if err := s.insertRun(ctx, rep); err != nil {
 		return RunReport{}, err
@@ -382,6 +382,11 @@ func (s *storeImpl) insertRun(ctx context.Context, r RunReport) error {
 	drift, _ := json.Marshal(orEmpty(r.Drift))
 	gone, _ := json.Marshal(orEmpty(r.Gone))
 	errs, _ := json.Marshal(orEmpty(r.Errors))
+	// 0 and 1 rather than the bool itself. dry_run is an INTEGER column and
+	// SQLite takes a Go bool for one without complaint; PostgreSQL refuses it
+	// — "unable to encode true into binary format for int4" — so this is one
+	// of the two lines in this package that would have failed on the first
+	// real run against a PostgreSQL brain and could not fail in a test.
 	dry := 0
 	if r.DryRun {
 		dry = 1

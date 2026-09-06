@@ -35,7 +35,7 @@ func (s *Store) Draft(ctx context.Context, document []byte, by, note string) (Ve
 		return Version{}, fmt.Errorf("ontologies: rendering %s: %w", o.ID, err)
 	}
 
-	at := s.now()
+	at := s.at()
 	v := Version{
 		ID: o.ID, Lineage: lineageOf(o.ID), State: Draft, Document: body,
 		CreatedBy: by, CreatedAt: at, Note: note,
@@ -97,7 +97,7 @@ func (s *Store) Propose(ctx context.Context, id, job, part string, proposals []a
 	if state == Draft {
 		state = Proposed
 	}
-	at := s.now()
+	at := s.at()
 	const q = `UPDATE athanor_ontology_versions
 		SET state = ?, part = ?, proposals = ?, proposed_from = ? WHERE id = ?`
 	if _, err := s.exec(ctx, q, string(state), part, string(encoded), job, id); err != nil {
@@ -201,7 +201,7 @@ func (s *Store) Approve(ctx context.Context, id string, req Approval) (Version, 
 		return Version{}, fmt.Errorf("ontologies: rendering %s: %w", extended.ID, err)
 	}
 
-	at := s.now()
+	at := s.at()
 	v := Version{
 		ID: extended.ID, Lineage: lineageOf(extended.ID), State: Approved,
 		Parent: id, Document: body, Part: string(part),
@@ -325,7 +325,7 @@ func (s *Store) Publish(ctx context.Context, id string, req Publication) (Versio
 		return Version{}, "", fmt.Errorf("%w: %s is already the current vocabulary of %s", ErrState, id, v.Lineage)
 	}
 
-	at := s.now()
+	at := s.at()
 	// Re-publishing a retired version is a rollback, and it is allowed. The
 	// alternative is that a vocabulary found to be wrong can only be undone by
 	// approving a new version that undoes it, which is a worse record of what
