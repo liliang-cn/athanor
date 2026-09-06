@@ -46,6 +46,23 @@ type Options struct {
 	// to bypass: it never lets the store embed what alchemy did not.
 	Embedder cortexdb.Embedder
 
+	// VaultPath is where the originals of reversible treatments live: a
+	// SQLite file of its own, beside the brain by default and never inside
+	// it. That separation is the product's claim made physical — a masked
+	// value in the graph is a token, the value it stands for is here, on this
+	// machine, and a copy of the brain carries neither.
+	VaultPath string
+	// VaultKeyFile holds the key the vault encrypts under: 32 raw bytes or 64
+	// hex characters. There is no vault without it, and there is no
+	// generated-for-you key, because a key sitting beside the file it opens
+	// is not a key. A deployment with no key signs no plan holding a
+	// reversible treatment — it is refused, with the columns named, rather
+	// than quietly made irreversible.
+	VaultKeyFile string
+	// VaultTenant separates one deployment's tokens from another's when a
+	// vault file is shared. Empty is "athanor".
+	VaultTenant string
+
 	// Runner replaces the extraction pipeline. Nil is the real one; a test
 	// supplies one that returns what it says, so nothing here needs a model.
 	Runner service.Runner

@@ -51,7 +51,7 @@ func (s *storeImpl) propose(ctx context.Context, src Source, opts ProposeOptions
 	}
 
 	mp, err := connector.BuildMaskingPlan(ctx, live, connector.NewRuleClassifier(), connector.PlanOptions{
-		DefaultAction:   connector.ActionRedact,
+		DefaultAction:   firstAction(opts.DefaultAction, connector.ActionRedact),
 		ActionFor:       opts.ActionFor,
 		ScanTextColumns: opts.ScanText,
 	})
@@ -67,7 +67,7 @@ func (s *storeImpl) propose(ctx context.Context, src Source, opts ProposeOptions
 	p.State = Draft
 	p.Counts = countOf(p.Columns)
 	p.CreatedBy = opts.By
-	p.CreatedAt = s.now()
+	p.CreatedAt = s.at()
 	p.Note = opts.Note
 	if p.ID, err = mintID("plan"); err != nil {
 		return Plan{}, err
@@ -89,6 +89,14 @@ func (s *storeImpl) propose(ctx context.Context, src Source, opts ProposeOptions
 	// The draft stands whether or not the audit view hears about it.
 	_ = s.mirror(ctx, act)
 	return p.Plan, nil
+}
+
+// firstAction is the caller's choice, or the fail-closed default.
+func firstAction(chosen, fallback connector.MaskAction) connector.MaskAction {
+	if chosen == "" {
+		return fallback
+	}
+	return chosen
 }
 
 // treatmentsFor turns the connector's rules into the reviewable rows, in a
@@ -210,6 +218,11 @@ func countOf(ts []Treatment) Counts {
 			c.Redacted++
 		case connector.ActionKeep:
 			c.Passed++
+			// Kept prose with nothing looking inside it. The column-level
+			// classifier judged the column and cannot judge the sentences.
+			if t.Type == "text" && !t.Scan {
+				c.UnscannedText++
+			}
 		}
 	}
 	return c
@@ -392,7 +405,7 @@ func (s *storeImpl) sign(ctx context.Context, id, hash, by, note string) (Plan, 
 		return Plan{}, fmt.Errorf("%w: %d column(s) are pseudonymized", ErrNoVault, p.Counts.Reversible)
 	}
 
-	at := s.now()
+	at := s.at()
 	var superseded string
 	const findCurrent = `SELECT id FROM athanor_livedb_plans
 		WHERE source_key = ? AND state = ? ORDER BY signed_at DESC, id DESC`

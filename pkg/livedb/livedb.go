@@ -195,6 +195,17 @@ type Counts struct {
 	// Reversible is how many columns can be turned back, which is the number
 	// the vault paragraph is about.
 	Reversible int `json:"reversible"`
+	// UnscannedText is how many free-text columns pass through whole, with
+	// nothing looking inside them.
+	//
+	// It is counted because it is this plan's quietest way to leak. A column
+	// classified as not personal and kept is the ordinary, correct case for a
+	// hostname or a rack number; for a column of prose it means whatever
+	// somebody typed into it goes into the graph intact, and people type
+	// addresses into free text. The column-level classifier cannot see that —
+	// it judges the column, not the sentences — so the number is put in front
+	// of the reviewer, who either accepts it or turns on scanning.
+	UnscannedText int `json:"unscanned_text"`
 }
 
 // State is where a plan is in its life.
@@ -246,6 +257,18 @@ type ProposeOptions struct {
 	// SampleSize is how many rows per table are read for classification.
 	// Zero takes the connector's default of five.
 	SampleSize int `json:"sample_size,omitempty"`
+	// DefaultAction is what happens to a column the classifier does not call
+	// personal. Empty is connector.ActionRedact — fail closed.
+	//
+	// It is the operator's to choose rather than this package's to decide,
+	// and it is safe to let them choose because the default is not the
+	// control: nothing runs until somebody signs a plan they read, and the
+	// review screen shows exactly what "keep" turned into before the
+	// signature exists. Redacting every unclassified column is the honest
+	// default and a useless first proposal — a schema of hostnames and rack
+	// numbers comes back entirely [REDACTED] — so an operator who has looked
+	// at their own schema says `keep` here and reads the consequence.
+	DefaultAction connector.MaskAction `json:"default_action,omitempty"`
 	// ActionFor overrides the treatment chosen for a PII kind, for an
 	// operator who has a house rule ("we never keep an email, even masked").
 	ActionFor map[connector.PiiKind]connector.MaskAction `json:"action_for,omitempty"`

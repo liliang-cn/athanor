@@ -115,16 +115,40 @@ func (l *liveSource) Close() error {
 	return err
 }
 
+// Keys reads a table's primary key.
+//
+// On PostgreSQL this asks pg_catalog rather than information_schema, and that
+// is not a preference. information_schema.table_constraints shows only
+// constraints on tables the current user owns or holds "some privilege other
+// than SELECT" on — so a role with nothing but SELECT, which is exactly the
+// read-only role this whole feature asks an operator to connect with, sees an
+// empty result and no error. The consequence was silent and total: every table
+// looked keyless, every table got a RAG chunk and no graph node, and an import
+// of a schema full of foreign keys produced zero triples while reporting
+// success. pg_catalog is not privilege-filtered that way.
+//
+// MySQL's information_schema is filtered by ordinary table privileges, where
+// SELECT is enough, so it keeps the portable query.
 func (l *liveSource) Keys(ctx context.Context, table string) ([]string, error) {
-	const q = `SELECT kcu.column_name
-		FROM information_schema.table_constraints tc
-		JOIN information_schema.key_column_usage kcu
-		  ON kcu.constraint_name = tc.constraint_name
-		 AND kcu.table_schema = tc.table_schema
-		 AND kcu.table_name = tc.table_name
-		WHERE tc.constraint_type = 'PRIMARY KEY'
-		  AND tc.table_schema = %s AND tc.table_name = %s
-		ORDER BY kcu.ordinal_position`
+	q := `SELECT a.attname
+		FROM pg_index i
+		JOIN pg_class c ON c.oid = i.indrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		JOIN unnest(i.indkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE
+		JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
+		WHERE i.indisprimary AND n.nspname = %s AND c.relname = %s
+		ORDER BY k.ord`
+	if l.driver == "mysql" {
+		q = `SELECT kcu.column_name
+			FROM information_schema.table_constraints tc
+			JOIN information_schema.key_column_usage kcu
+			  ON kcu.constraint_name = tc.constraint_name
+			 AND kcu.table_schema = tc.table_schema
+			 AND kcu.table_name = tc.table_name
+			WHERE tc.constraint_type = 'PRIMARY KEY'
+			  AND tc.table_schema = %s AND tc.table_name = %s
+			ORDER BY kcu.ordinal_position`
+	}
 	rows, err := l.meta.QueryContext(ctx, l.bind(q), l.schema, table)
 	if err != nil {
 		return nil, fmt.Errorf("livedb: primary key of %s: %w", table, err)
@@ -142,15 +166,21 @@ func (l *liveSource) Keys(ctx context.Context, table string) ([]string, error) {
 }
 
 func (l *liveSource) Relations(ctx context.Context, table string) ([]Relation, error) {
-	q := `SELECT tc.constraint_name, kcu.column_name, ccu.table_name, ccu.column_name
-		FROM information_schema.table_constraints tc
-		JOIN information_schema.key_column_usage kcu
-		  ON kcu.constraint_name = tc.constraint_name AND kcu.table_schema = tc.table_schema
-		JOIN information_schema.constraint_column_usage ccu
-		  ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-		WHERE tc.constraint_type = 'FOREIGN KEY'
-		  AND tc.table_schema = %s AND tc.table_name = %s
-		ORDER BY tc.constraint_name, kcu.ordinal_position`
+	// pg_catalog for the same reason as Keys: constraint_column_usage is
+	// privilege-filtered even harder than table_constraints — it shows only
+	// what the current user owns — so the read-only role this feature is meant
+	// to be used with reads no foreign key at all through it.
+	q := `SELECT con.conname, a.attname, tc.relname, ta.attname
+		FROM pg_constraint con
+		JOIN pg_class c ON c.oid = con.conrelid
+		JOIN pg_namespace n ON n.oid = c.relnamespace
+		JOIN pg_class tc ON tc.oid = con.confrelid
+		JOIN unnest(con.conkey) WITH ORDINALITY AS k(attnum, ord) ON TRUE
+		JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum = k.attnum
+		JOIN unnest(con.confkey) WITH ORDINALITY AS fk(attnum, ord) ON fk.ord = k.ord
+		JOIN pg_attribute ta ON ta.attrelid = tc.oid AND ta.attnum = fk.attnum
+		WHERE con.contype = 'f' AND n.nspname = %s AND c.relname = %s
+		ORDER BY con.conname, k.ord`
 	if l.driver == "mysql" {
 		// MySQL has no constraint_column_usage; the referenced side is on
 		// key_column_usage itself.

@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/liliang-cn/athanor/internal/braintest"
 	"github.com/liliang-cn/cortexdb/v2/pkg/connector"
-	"github.com/liliang-cn/cortexdb/v2/pkg/cortexdb"
 	"github.com/liliang-cn/cortexdb/v2/pkg/importflow"
 )
 
@@ -23,11 +22,13 @@ import (
 // propose call and the run call, and no fixture over a real database can do
 // that without a migration in the middle of a test.
 //
-// PostgreSQL parity: pkg/ontologies runs its store suite on both backends
-// behind ATHANOR_TEST_POSTGRES. This one runs on SQLite only. Everything it
-// exercises goes through the same Rebind-on-the-way-past helpers and the
-// schema is dialect-chosen, but that is an argument, not a test, and it is
-// said here rather than left to be discovered.
+// PostgreSQL parity: every test that touches the database runs on both
+// backends, through internal/braintest and behind ATHANOR_TEST_POSTGRES. It
+// used not to, and the argument for why it did not need to — the same
+// Rebind-on-the-way-past helpers, a dialect-chosen schema — was an argument
+// rather than a test. The pure functions below (the redaction, the source
+// key, driftOf) run once: they never reach a handle, and running them twice
+// would only be slower.
 
 // ---------------------------------------------------------------- the fakes
 
@@ -291,31 +292,61 @@ func liveV1() *fakeLive {
 
 // ---------------------------------------------------------------- the harness
 
+// eachBrain runs one test body once per backend this run covers.
+func eachBrain(t *testing.T, fn func(t *testing.T, b braintest.Brain)) {
+	t.Helper()
+	for _, b := range braintest.Backends(t) {
+		t.Run(b.Name, func(t *testing.T) { fn(t, b) })
+	}
+}
+
+// uniqueDSN names a database no other harness in this run proposes for.
+//
+// A SQLite brain is a fresh file per harness; a PostgreSQL brain is one
+// database shared by the whole package. "One signed plan per source" is a
+// partial unique index and does not care which test wrote the two rows, so
+// two harnesses on the fixed dsnLive would be one test refusing to sign
+// because another already had. The rotated one is the same database with
+// another password — that is the whole point of it — and the unparsable one
+// is a third source that no parser here can read.
+func uniqueDSN() (live, rotated, unparsable string) {
+	name := braintest.Unique("sales")
+	return "postgres://app:s3cr3t@db.internal:5432/" + name + "?sslmode=require",
+		"postgres://app:newp4ss@db.internal:5432/" + name + "?sslmode=require",
+		"!!weird!! password=hunter2 &&& " + name
+}
+
 type harness struct {
 	store    *Store
 	opener   *fakeOpener
 	importer *fakeImporter
 	ledger   *fakeLedger
 	clock    *time.Time
+
+	// dsn, rotated and unparsable are this harness's own source. See
+	// uniqueDSN.
+	dsn        string
+	rotated    string
+	unparsable string
 }
 
-func newHarness(t *testing.T, opts ...Option) *harness {
+func newHarness(t *testing.T, b braintest.Brain, opts ...Option) *harness {
 	t.Helper()
-	cfg := cortexdb.DefaultConfig(filepath.Join(t.TempDir(), "brain.db"))
-	cfg.Dimensions = 4
-	db, err := cortexdb.Open(cfg)
-	if err != nil {
-		t.Fatalf("open brain: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
+	db := b.Open(t)
 
-	at := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	// Nanoseconds on purpose. PostgreSQL's TIMESTAMPTZ resolves to
+	// microseconds and SQLite keeps whatever it is given, so a clock ticking
+	// in whole seconds is a clock that cannot tell the two apart — and the
+	// round-trip assertions below are exactly the ones that would then have
+	// passed on both backends while production disagreed with itself on one.
+	at := time.Date(2026, 3, 1, 12, 0, 0, 123456789, time.UTC)
 	h := &harness{
 		opener:   &fakeOpener{live: liveV1()},
 		importer: &fakeImporter{},
 		ledger:   &fakeLedger{},
 		clock:    &at,
 	}
+	h.dsn, h.rotated, h.unparsable = uniqueDSN()
 	all := append([]Option{
 		WithOpener(h.opener),
 		WithImporter(h.importer),
@@ -329,6 +360,9 @@ func newHarness(t *testing.T, opts ...Option) *harness {
 	if err != nil {
 		t.Fatalf("livedb.New: %v", err)
 	}
+	if got := s.Dialect().Kind(); got != b.Kind {
+		t.Fatalf("the %s store speaks %s", b.Name, got)
+	}
 	h.store = s
 	return h
 }
@@ -336,7 +370,7 @@ func newHarness(t *testing.T, opts ...Option) *harness {
 // propose is the shape almost every test starts from.
 func (h *harness) propose(t *testing.T) Plan {
 	t.Helper()
-	p, err := h.store.Propose(context.Background(), Source{Driver: "postgres", DSN: dsnLive},
+	p, err := h.store.Propose(context.Background(), Source{Driver: "postgres", DSN: h.dsn},
 		ProposeOptions{By: "operator", Note: "the sales database"})
 	if err != nil {
 		t.Fatalf("propose: %v", err)
@@ -380,39 +414,41 @@ func treatmentOf(t *testing.T, p Plan, table, column string) Treatment {
 // ------------------------------------------------------------------- the DSN
 
 func TestTheCredentialReachesNeitherTheRowNorTheReply(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	p := h.propose(t)
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		p := h.propose(t)
 
-	if p.Source.DSN != "" {
-		t.Fatalf("the returned plan carries a DSN: %q", p.Source.DSN)
-	}
-	if strings.Contains(p.Source.Redacted, "s3cr3t") {
-		t.Fatalf("the redaction still holds the password: %q", p.Source.Redacted)
-	}
-	if !strings.Contains(p.Source.Redacted, "db.internal") {
-		t.Fatalf("the redaction lost the hostname, which is the half a reader needs: %q", p.Source.Redacted)
-	}
-	if got := rowText(t, h, p.ID); strings.Contains(got, "s3cr3t") {
-		t.Fatalf("the stored row holds the password: %s", got)
-	}
+		if p.Source.DSN != "" {
+			t.Fatalf("the returned plan carries a DSN: %q", p.Source.DSN)
+		}
+		if strings.Contains(p.Source.Redacted, "s3cr3t") {
+			t.Fatalf("the redaction still holds the password: %q", p.Source.Redacted)
+		}
+		if !strings.Contains(p.Source.Redacted, "db.internal") {
+			t.Fatalf("the redaction lost the hostname, which is the half a reader needs: %q", p.Source.Redacted)
+		}
+		if got := rowText(t, h, p.ID); strings.Contains(got, "s3cr3t") {
+			t.Fatalf("the stored row holds the password: %s", got)
+		}
 
-	// A DSN nothing here can parse is redacted MORE, not less: what comes back
-	// says only that it could not be read.
-	weird, err := h.store.Propose(ctx, Source{Driver: "postgres", DSN: "!!weird!! password=hunter2 &&&"},
-		ProposeOptions{By: "operator"})
-	if err != nil {
-		t.Fatalf("propose an unparsable dsn: %v", err)
-	}
-	if strings.Contains(weird.Source.Redacted, "hunter2") || strings.Contains(weird.Source.Redacted, "weird") {
-		t.Fatalf("an unparsable dsn leaked through the redaction: %q", weird.Source.Redacted)
-	}
-	if !strings.Contains(weird.Source.Redacted, "unparsed") {
-		t.Fatalf("an unparsable dsn should say so: %q", weird.Source.Redacted)
-	}
-	if got := rowText(t, h, weird.ID); strings.Contains(got, "hunter2") {
-		t.Fatalf("the stored row holds an unparsable dsn's password: %s", got)
-	}
+		// A DSN nothing here can parse is redacted MORE, not less: what comes back
+		// says only that it could not be read.
+		weird, err := h.store.Propose(ctx, Source{Driver: "postgres", DSN: h.unparsable},
+			ProposeOptions{By: "operator"})
+		if err != nil {
+			t.Fatalf("propose an unparsable dsn: %v", err)
+		}
+		if strings.Contains(weird.Source.Redacted, "hunter2") || strings.Contains(weird.Source.Redacted, "weird") {
+			t.Fatalf("an unparsable dsn leaked through the redaction: %q", weird.Source.Redacted)
+		}
+		if !strings.Contains(weird.Source.Redacted, "unparsed") {
+			t.Fatalf("an unparsable dsn should say so: %q", weird.Source.Redacted)
+		}
+		if got := rowText(t, h, weird.ID); strings.Contains(got, "hunter2") {
+			t.Fatalf("the stored row holds an unparsable dsn's password: %s", got)
+		}
+	})
 }
 
 // rowText is every textual column of a plan row, joined — so a test asking
@@ -476,506 +512,585 @@ func TestTheSourceKeySurvivesARotationAndNothingElse(t *testing.T) {
 // ------------------------------------------------------------------ the hash
 
 func TestTheHashIsTheThingSigned(t *testing.T) {
-	h := newHarness(t)
-	p := h.propose(t)
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		h := newHarness(t, b)
+		p := h.propose(t)
 
-	if planHash(p) != p.Hash || planHash(p) != planHash(p) {
-		t.Fatalf("the hash is not a function of the plan")
-	}
-	amended := h.keepFK(t, p.ID)
-	if amended.Hash == p.Hash {
-		t.Fatalf("changing an action did not change the hash")
-	}
-	if amended.Counts.Passed != p.Counts.Passed+1 || amended.Counts.Redacted != p.Counts.Redacted-1 {
-		t.Fatalf("the counts did not follow the amendment: %+v -> %+v", p.Counts, amended.Counts)
-	}
-	if got := treatmentOf(t, amended, "orders", "customer_id"); got.By != "liliang" {
-		t.Fatalf("an amended treatment should name who amended it, got %q", got.By)
-	}
-	if got := treatmentOf(t, amended, "customers", "email"); got.By != "rule" {
-		t.Fatalf("an untouched treatment should still name the classifier, got %q", got.By)
-	}
+		if planHash(p) != p.Hash || planHash(p) != planHash(p) {
+			t.Fatalf("the hash is not a function of the plan")
+		}
+		amended := h.keepFK(t, p.ID)
+		if amended.Hash == p.Hash {
+			t.Fatalf("changing an action did not change the hash")
+		}
+		if amended.Counts.Passed != p.Counts.Passed+1 || amended.Counts.Redacted != p.Counts.Redacted-1 {
+			t.Fatalf("the counts did not follow the amendment: %+v -> %+v", p.Counts, amended.Counts)
+		}
+		if got := treatmentOf(t, amended, "orders", "customer_id"); got.By != "liliang" {
+			t.Fatalf("an amended treatment should name who amended it, got %q", got.By)
+		}
+		if got := treatmentOf(t, amended, "customers", "email"); got.By != "rule" {
+			t.Fatalf("an untouched treatment should still name the classifier, got %q", got.By)
+		}
+	})
 }
 
 func TestAnAmendmentNamingNothingIsRefused(t *testing.T) {
-	h := newHarness(t)
-	p := h.propose(t)
-	_, err := h.store.Amend(context.Background(), p.ID, []Change{
-		{Table: "customers", Column: "no_such_column", Action: connector.ActionDrop},
-	}, "liliang")
-	if err == nil {
-		t.Fatalf("an amendment naming a column the plan does not hold must be an error, not a no-op")
-	}
-	if !strings.Contains(err.Error(), "no_such_column") {
-		t.Fatalf("the error should name the column: %v", err)
-	}
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		h := newHarness(t, b)
+		p := h.propose(t)
+		_, err := h.store.Amend(context.Background(), p.ID, []Change{
+			{Table: "customers", Column: "no_such_column", Action: connector.ActionDrop},
+		}, "liliang")
+		if err == nil {
+			t.Fatalf("an amendment naming a column the plan does not hold must be an error, not a no-op")
+		}
+		if !strings.Contains(err.Error(), "no_such_column") {
+			t.Fatalf("the error should name the column: %v", err)
+		}
+	})
 }
 
 // -------------------------------------------------------------- the proposal
 
 func TestWhatTheReviewerIsShown(t *testing.T) {
-	h := newHarness(t)
-	p := h.propose(t)
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		h := newHarness(t, b)
+		p := h.propose(t)
 
-	email := treatmentOf(t, p, "customers", "email")
-	if email.Kind != connector.PiiEmail || email.Action != connector.ActionMask {
-		t.Fatalf("an email column classified as %+v", email)
-	}
-	if email.Sample == "ada@example.com" {
-		t.Fatalf("a personal column's sample is shown raw: %q", email.Sample)
-	}
-	if !strings.Contains(email.Sample, "@example.com") {
-		t.Fatalf("a masked email should still read as an email: %q", email.Sample)
-	}
+		email := treatmentOf(t, p, "customers", "email")
+		if email.Kind != connector.PiiEmail || email.Action != connector.ActionMask {
+			t.Fatalf("an email column classified as %+v", email)
+		}
+		if email.Sample == "ada@example.com" {
+			t.Fatalf("a personal column's sample is shown raw: %q", email.Sample)
+		}
+		if !strings.Contains(email.Sample, "@example.com") {
+			t.Fatalf("a masked email should still read as an email: %q", email.Sample)
+		}
 
-	city := treatmentOf(t, p, "customers", "city")
-	if city.Kind != connector.PiiNone {
-		t.Fatalf("city should not classify as personal, got %q", city.Kind)
-	}
-	if city.Sample != "Cambridge" {
-		t.Fatalf("a column the classifier calls impersonal must be shown as it is, got %q", city.Sample)
-	}
-	if city.Action != connector.ActionRedact || city.Enters != "[REDACTED]" {
-		t.Fatalf("default-deny should redact city, got %q -> %q", city.Action, city.Enters)
-	}
+		city := treatmentOf(t, p, "customers", "city")
+		if city.Kind != connector.PiiNone {
+			t.Fatalf("city should not classify as personal, got %q", city.Kind)
+		}
+		if city.Sample != "Cambridge" {
+			t.Fatalf("a column the classifier calls impersonal must be shown as it is, got %q", city.Sample)
+		}
+		if city.Action != connector.ActionRedact || city.Enters != "[REDACTED]" {
+			t.Fatalf("default-deny should redact city, got %q -> %q", city.Action, city.Enters)
+		}
 
-	idCard := treatmentOf(t, p, "customers", "id_card")
-	if idCard.Action != connector.ActionDrop || idCard.Enters != "" {
-		t.Fatalf("a national id should be dropped and enter nothing, got %q -> %q", idCard.Action, idCard.Enters)
-	}
+		idCard := treatmentOf(t, p, "customers", "id_card")
+		if idCard.Action != connector.ActionDrop || idCard.Enters != "" {
+			t.Fatalf("a national id should be dropped and enter nothing, got %q -> %q", idCard.Action, idCard.Enters)
+		}
 
-	// An empty allow-list is resolved, so the plan names what it covers.
-	if got := strings.Join(p.Source.Tables, ","); got != "customers,events,orders" {
-		t.Fatalf("the plan should name the real tables, got %q", got)
-	}
-	if p.State != Draft || p.SignedBy != "" {
-		t.Fatalf("a proposal is a draft nobody signed: %+v", p)
-	}
-	if p.Counts.Columns != 10 || p.Counts.Personal != 2 {
-		t.Fatalf("counts: %+v", p.Counts)
-	}
+		// An empty allow-list is resolved, so the plan names what it covers.
+		if got := strings.Join(p.Source.Tables, ","); got != "customers,events,orders" {
+			t.Fatalf("the plan should name the real tables, got %q", got)
+		}
+		if p.State != Draft || p.SignedBy != "" {
+			t.Fatalf("a proposal is a draft nobody signed: %+v", p)
+		}
+		// And read back out of the table it is still that. signed_at is NULL
+		// on a draft and Plan has a plain time.Time, so this is the NULL
+		// versus zero crossing — a scan that landed the NULL somewhere else
+		// would give a draft a signing time.
+		back, err := h.store.Get(context.Background(), p.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if !back.SignedAt.IsZero() {
+			t.Fatalf("a draft came back signed at %v", back.SignedAt)
+		}
+		if !back.CreatedAt.Equal(p.CreatedAt) || back.CreatedAt.Location() != time.UTC {
+			t.Fatalf("created_at came back as %v (%v), want %v UTC",
+				back.CreatedAt, back.CreatedAt.Location(), p.CreatedAt)
+		}
+		if back.Hash != p.Hash || back.Counts != p.Counts || len(back.Columns) != len(p.Columns) {
+			t.Fatalf("the plan did not round trip: %+v", back)
+		}
+		if p.Counts.Columns != 10 || p.Counts.Personal != 2 {
+			t.Fatalf("counts: %+v", p.Counts)
+		}
+	})
 }
 
 // -------------------------------------------------------------- the signature
 
 func TestSigningRefusesWhatItShould(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	p := h.propose(t)
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		p := h.propose(t)
 
-	if _, err := h.store.Sign(ctx, p.ID, "not-the-hash", "liliang", ""); !errors.Is(err, ErrStaleHash) {
-		t.Fatalf("a stale hash should be ErrStaleHash, got %v", err)
-	}
-	if _, err := h.store.Sign(ctx, "plan_nothing", p.Hash, "liliang", ""); !errors.Is(err, ErrNoPlan) {
-		t.Fatalf("an unknown plan should be ErrNoPlan, got %v", err)
-	}
-	signed := h.sign(t, p)
-	if signed.State != Signed || signed.SignedBy != "liliang" || signed.SignedAt.IsZero() {
-		t.Fatalf("signed as %+v", signed)
-	}
-	if _, err := h.store.Sign(ctx, p.ID, signed.Hash, "liliang", ""); !errors.Is(err, ErrNotDraft) {
-		t.Fatalf("signing twice should be ErrNotDraft, got %v", err)
-	}
-	if _, err := h.store.Amend(ctx, p.ID, []Change{
-		{Table: "customers", Column: "city", Action: connector.ActionDrop},
-	}, "liliang"); !errors.Is(err, ErrNotDraft) {
-		t.Fatalf("amending a signed plan should be ErrNotDraft, got %v", err)
-	}
+		if _, err := h.store.Sign(ctx, p.ID, "not-the-hash", "liliang", ""); !errors.Is(err, ErrStaleHash) {
+			t.Fatalf("a stale hash should be ErrStaleHash, got %v", err)
+		}
+		if _, err := h.store.Sign(ctx, "plan_nothing", p.Hash, "liliang", ""); !errors.Is(err, ErrNoPlan) {
+			t.Fatalf("an unknown plan should be ErrNoPlan, got %v", err)
+		}
+		signed := h.sign(t, p)
+		if signed.State != Signed || signed.SignedBy != "liliang" || signed.SignedAt.IsZero() {
+			t.Fatalf("signed as %+v", signed)
+		}
+		if _, err := h.store.Sign(ctx, p.ID, signed.Hash, "liliang", ""); !errors.Is(err, ErrNotDraft) {
+			t.Fatalf("signing twice should be ErrNotDraft, got %v", err)
+		}
+		if _, err := h.store.Amend(ctx, p.ID, []Change{
+			{Table: "customers", Column: "city", Action: connector.ActionDrop},
+		}, "liliang"); !errors.Is(err, ErrNotDraft) {
+			t.Fatalf("amending a signed plan should be ErrNotDraft, got %v", err)
+		}
+	})
 }
 
 func TestAReversibleTreatmentNeedsSomewhereToPutTheOriginal(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	p := h.propose(t)
-	// Pseudonymize is the only reversible action, and nothing in the fixture
-	// classifies as a name — so the human asks for it, which is the case that
-	// matters: the refusal has to survive an override.
-	p, err := h.store.Amend(ctx, p.ID, []Change{
-		{Table: "customers", Column: "city", Action: connector.ActionPseudonymize},
-	}, "liliang")
-	if err != nil {
-		t.Fatalf("amend: %v", err)
-	}
-	if p.Counts.Reversible != 1 {
-		t.Fatalf("counts should have noticed the reversible column: %+v", p.Counts)
-	}
-	if _, err := h.store.Sign(ctx, p.ID, p.Hash, "liliang", ""); !errors.Is(err, ErrNoVault) {
-		t.Fatalf("signing a pseudonymizing plan with no vault should be ErrNoVault, got %v", err)
-	}
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		p := h.propose(t)
+		// Pseudonymize is the only reversible action, and nothing in the fixture
+		// classifies as a name — so the human asks for it, which is the case that
+		// matters: the refusal has to survive an override.
+		p, err := h.store.Amend(ctx, p.ID, []Change{
+			{Table: "customers", Column: "city", Action: connector.ActionPseudonymize},
+		}, "liliang")
+		if err != nil {
+			t.Fatalf("amend: %v", err)
+		}
+		if p.Counts.Reversible != 1 {
+			t.Fatalf("counts should have noticed the reversible column: %+v", p.Counts)
+		}
+		if _, err := h.store.Sign(ctx, p.ID, p.Hash, "liliang", ""); !errors.Is(err, ErrNoVault) {
+			t.Fatalf("signing a pseudonymizing plan with no vault should be ErrNoVault, got %v", err)
+		}
 
-	// With a vault it signs, and the refusal was about the vault and nothing
-	// else.
-	withVault := newHarness(t, WithVault(&memVault{}, connector.StaticKeyProvider(make([]byte, 32)), "acme"))
-	q := withVault.propose(t)
-	q, err = withVault.store.Amend(ctx, q.ID, []Change{
-		{Table: "customers", Column: "city", Action: connector.ActionPseudonymize},
-	}, "liliang")
-	if err != nil {
-		t.Fatalf("amend: %v", err)
-	}
-	if _, err := withVault.store.Sign(ctx, q.ID, q.Hash, "liliang", ""); err != nil {
-		t.Fatalf("sign with a vault: %v", err)
-	}
+		// With a vault it signs, and the refusal was about the vault and nothing
+		// else.
+		withVault := newHarness(t, b, WithVault(&memVault{}, connector.StaticKeyProvider(make([]byte, 32)), "acme"))
+		q := withVault.propose(t)
+		q, err = withVault.store.Amend(ctx, q.ID, []Change{
+			{Table: "customers", Column: "city", Action: connector.ActionPseudonymize},
+		}, "liliang")
+		if err != nil {
+			t.Fatalf("amend: %v", err)
+		}
+		if _, err := withVault.store.Sign(ctx, q.ID, q.Hash, "liliang", ""); err != nil {
+			t.Fatalf("sign with a vault: %v", err)
+		}
+	})
 }
 
 func TestASignatureSupersedesAndOnlyOneStands(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
 
-	first := h.sign(t, h.propose(t))
-	second := h.sign(t, h.propose(t))
+		first := h.sign(t, h.propose(t))
+		second := h.sign(t, h.propose(t))
 
-	if second.Supersedes != first.ID {
-		t.Fatalf("the second signature should name the first: %q", second.Supersedes)
-	}
-	back, err := h.store.Get(ctx, first.ID)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if back.State != Superseded {
-		t.Fatalf("the first plan should be superseded, is %q", back.State)
-	}
-	cur, err := h.store.Current(ctx, second.SourceKey)
-	if err != nil {
-		t.Fatalf("current: %v", err)
-	}
-	if cur.ID != second.ID {
-		t.Fatalf("current is %s, want %s", cur.ID, second.ID)
-	}
-	// A plan kept after being replaced, because a run that happened under it
-	// is only explicable if it still exists.
-	all, err := h.store.List(ctx, ListQuery{SourceKey: second.SourceKey})
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(all) != 2 {
-		t.Fatalf("both plans should still be there, got %d", len(all))
-	}
+		if second.Supersedes != first.ID {
+			t.Fatalf("the second signature should name the first: %q", second.Supersedes)
+		}
+		back, err := h.store.Get(ctx, first.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if back.State != Superseded {
+			t.Fatalf("the first plan should be superseded, is %q", back.State)
+		}
+		cur, err := h.store.Current(ctx, second.SourceKey)
+		if err != nil {
+			t.Fatalf("current: %v", err)
+		}
+		if cur.ID != second.ID {
+			t.Fatalf("current is %s, want %s", cur.ID, second.ID)
+		}
+		// A plan kept after being replaced, because a run that happened under it
+		// is only explicable if it still exists.
+		all, err := h.store.List(ctx, ListQuery{SourceKey: second.SourceKey})
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		if len(all) != 2 {
+			t.Fatalf("both plans should still be there, got %d", len(all))
+		}
+		// The state filter and the limit, which are the two clauses List
+		// builds rather than states — and LIMIT is a bound parameter, so it
+		// is one of the places a rebind that miscounted would land.
+		signedOnly, err := h.store.List(ctx, ListQuery{SourceKey: second.SourceKey, State: Signed, Limit: 5})
+		if err != nil {
+			t.Fatalf("list the signed: %v", err)
+		}
+		if len(signedOnly) != 1 || signedOnly[0].ID != second.ID {
+			t.Fatalf("only the second plan is signed, got %+v", signedOnly)
+		}
+		if one, err := h.store.List(ctx, ListQuery{SourceKey: second.SourceKey, Limit: 1}); err != nil || len(one) != 1 {
+			t.Fatalf("a limit of 1 returned %d plans: %v", len(one), err)
+		}
 
-	// And the rule is in the database, not only in the transaction that means
-	// it: a second path that forgot to supersede is refused outright.
-	_, err = h.store.impl.exec(ctx,
-		`UPDATE athanor_livedb_plans SET state = ? WHERE id = ?`, string(Signed), first.ID)
-	if err == nil {
-		t.Fatalf("the partial unique index let a second plan be signed for one source")
-	}
+		// And the rule is in the database, not only in the transaction that means
+		// it: a second path that forgot to supersede is refused outright.
+		_, err = h.store.impl.exec(ctx,
+			`UPDATE athanor_livedb_plans SET state = ? WHERE id = ?`, string(Signed), first.ID)
+		if err == nil {
+			t.Fatalf("the partial unique index let a second plan be signed for one source")
+		}
+		// As a uniqueness refusal, because "some error" would also be
+		// satisfied by a misspelled column. The two databases name different
+		// objects — SQLite the column, "UNIQUE constraint failed:
+		// athanor_livedb_plans.source_key", PostgreSQL the index, "duplicate
+		// key value violates unique constraint" — so what is asserted is the
+		// two words they share.
+		if !strings.Contains(strings.ToLower(err.Error()), "unique constraint") {
+			t.Fatalf("the refusal should be the one-signed index, got %v", err)
+		}
+	})
 }
 
 // ---------------------------------------------------------------- the run
 
 func TestARunNeedsASignatureAndTheRightDatabase(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	p := h.propose(t)
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		p := h.propose(t)
 
-	if _, err := h.store.Run(ctx, RunRequest{Plan: p.ID, DSN: dsnLive}, "job"); !errors.Is(err, ErrUnsigned) {
-		t.Fatalf("running a draft should be ErrUnsigned, got %v", err)
-	}
-	if _, err := h.store.Run(ctx, RunRequest{Plan: "plan_nothing", DSN: dsnLive}, "job"); !errors.Is(err, ErrNoPlan) {
-		t.Fatalf("running an unknown plan should be ErrNoPlan, got %v", err)
-	}
-	signed := h.sign(t, p)
+		if _, err := h.store.Run(ctx, RunRequest{Plan: p.ID, DSN: h.dsn}, "job"); !errors.Is(err, ErrUnsigned) {
+			t.Fatalf("running a draft should be ErrUnsigned, got %v", err)
+		}
+		if _, err := h.store.Run(ctx, RunRequest{Plan: "plan_nothing", DSN: h.dsn}, "job"); !errors.Is(err, ErrNoPlan) {
+			t.Fatalf("running an unknown plan should be ErrNoPlan, got %v", err)
+		}
+		signed := h.sign(t, p)
 
-	if _, err := h.store.Run(ctx, RunRequest{
-		Plan: signed.ID, DSN: "postgres://app:s3cr3t@db.internal:5432/staging",
-	}, "job"); !errors.Is(err, ErrWrongSource) {
-		t.Fatalf("a credential for another database should be ErrWrongSource, got %v", err)
-	}
-	// The rotated password is the same database and is accepted.
-	if _, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: dsnRotated}, "job"); err != nil {
-		t.Fatalf("a rotated credential for the same database should run: %v", err)
-	}
-	if h.importer.runs != 1 {
-		t.Fatalf("the importer ran %d times", h.importer.runs)
-	}
+		if _, err := h.store.Run(ctx, RunRequest{
+			Plan: signed.ID, DSN: "postgres://app:s3cr3t@db.internal:5432/staging",
+		}, "job"); !errors.Is(err, ErrWrongSource) {
+			t.Fatalf("a credential for another database should be ErrWrongSource, got %v", err)
+		}
+		// The rotated password is the same database and is accepted.
+		if _, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: h.rotated}, "job"); err != nil {
+			t.Fatalf("a rotated credential for the same database should run: %v", err)
+		}
+		if h.importer.runs != 1 {
+			t.Fatalf("the importer ran %d times", h.importer.runs)
+		}
+	})
 }
 
 func TestDriftIsReportedByNameAndTheColumnNeverArrives(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	signed := h.sign(t, h.keepFK(t, h.propose(t).ID))
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		signed := h.sign(t, h.keepFK(t, h.propose(t).ID))
 
-	// A week passes. customers gained loyalty_tier and lost city; neither is
-	// in the plan somebody signed.
-	h.opener.live = &fakeLive{
-		schemas: schemaV2(), rows: rowsV2(),
-		keys: map[string][]string{"customers": {"id"}},
-	}
-
-	rep, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: dsnLive}, "job")
-	if err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if strings.Join(rep.Drift, ",") != "customers.loyalty_tier" {
-		t.Fatalf("drift = %v", rep.Drift)
-	}
-	if strings.Join(rep.Gone, ",") != "customers.city" {
-		t.Fatalf("gone = %v", rep.Gone)
-	}
-
-	// The report is the operator's half. This is the database's: the drifted
-	// column is not in what the importer was handed, and neither is the one
-	// the plan drops.
-	got := h.importer.columns("customers")
-	if got["loyalty_tier"] {
-		t.Fatalf("the drifted column reached the import: %v", got)
-	}
-	if got["id_card"] {
-		t.Fatalf("a dropped column reached the import: %v", got)
-	}
-	if !got["email"] || !got["id"] {
-		t.Fatalf("the kept columns did not reach the import: %v", got)
-	}
-	for _, r := range h.importer.got {
-		if r.Values["email"] == "ada@example.com" {
-			t.Fatalf("a masked column arrived raw: %+v", r.Values)
+		// A week passes. customers gained loyalty_tier and lost city; neither is
+		// in the plan somebody signed.
+		h.opener.live = &fakeLive{
+			schemas: schemaV2(), rows: rowsV2(),
+			keys: map[string][]string{"customers": {"id"}},
 		}
-	}
+
+		rep, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: h.dsn}, "job")
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if strings.Join(rep.Drift, ",") != "customers.loyalty_tier" {
+			t.Fatalf("drift = %v", rep.Drift)
+		}
+		if strings.Join(rep.Gone, ",") != "customers.city" {
+			t.Fatalf("gone = %v", rep.Gone)
+		}
+
+		// The report is the operator's half. This is the database's: the drifted
+		// column is not in what the importer was handed, and neither is the one
+		// the plan drops.
+		got := h.importer.columns("customers")
+		if got["loyalty_tier"] {
+			t.Fatalf("the drifted column reached the import: %v", got)
+		}
+		if got["id_card"] {
+			t.Fatalf("a dropped column reached the import: %v", got)
+		}
+		if !got["email"] || !got["id"] {
+			t.Fatalf("the kept columns did not reach the import: %v", got)
+		}
+		for _, r := range h.importer.got {
+			if r.Values["email"] == "ada@example.com" {
+				t.Fatalf("a masked column arrived raw: %+v", r.Values)
+			}
+		}
+	})
 }
 
 func TestTheDerivedMappingNamesNothingThePlanRemoved(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	signed := h.sign(t, h.keepFK(t, h.propose(t).ID))
-	if _, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: dsnLive}, "job"); err != nil {
-		t.Fatalf("run: %v", err)
-	}
-	if len(h.importer.plans) != 1 {
-		t.Fatalf("the importer got %d plans", len(h.importer.plans))
-	}
-	mapping := h.importer.plans[0]
-
-	customers := mapping.Tables["customers"]
-	if customers.RAG == nil {
-		t.Fatalf("customers got no RAG plan")
-	}
-	if customers.RAG.IDColumn != "id" {
-		t.Fatalf("the primary key should address the chunk, got %q", customers.RAG.IDColumn)
-	}
-	if customers.RAG.Namespace != signed.ID {
-		t.Fatalf("an empty namespace should take the plan id, got %q", customers.RAG.Namespace)
-	}
-	blob, _ := json.Marshal(customers)
-	if strings.Contains(string(blob), "id_card") {
-		t.Fatalf("a dropped column is named in the mapping: %s", blob)
-	}
-	if !strings.Contains(customers.RAG.ContentTmpl, "{email}") {
-		t.Fatalf("the content template lost a kept column: %q", customers.RAG.ContentTmpl)
-	}
-	if customers.KG == nil || len(customers.KG.Entities) != 1 || customers.KG.Entities[0].IDTmpl != "customers:{id}" {
-		t.Fatalf("customers entity: %+v", customers.KG)
-	}
-
-	// A table with no primary key still gets a chunk — importflow synthesizes
-	// "table:row" — but no entity, because a node with no stable id is a node
-	// that duplicates on every re-run.
-	events := mapping.Tables["events"]
-	if events.RAG == nil {
-		t.Fatalf("a keyless table should still be retrievable")
-	}
-	if events.RAG.IDColumn != "" {
-		t.Fatalf("a keyless table has no id column, got %q", events.RAG.IDColumn)
-	}
-	if events.KG != nil {
-		t.Fatalf("a keyless table must not become an entity: %+v", events.KG)
-	}
-
-	// A foreign key becomes an edge, and the far end is emitted as a second
-	// entity keyed on the FK value so the two tables mint one node.
-	orders := mapping.Tables["orders"]
-	if orders.KG == nil || len(orders.KG.Relations) != 1 {
-		t.Fatalf("orders relations: %+v", orders.KG)
-	}
-	rel := orders.KG.Relations[0]
-	if rel.Subject != "orders" || rel.Predicate != "customer" {
-		t.Fatalf("relation: %+v", rel)
-	}
-	var target *importflow.EntityMap
-	for i := range orders.KG.Entities {
-		if orders.KG.Entities[i].Ref == rel.Object {
-			target = &orders.KG.Entities[i]
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		signed := h.sign(t, h.keepFK(t, h.propose(t).ID))
+		if _, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: h.dsn}, "job"); err != nil {
+			t.Fatalf("run: %v", err)
 		}
-	}
-	if target == nil {
-		t.Fatalf("the edge points at a ref no entity declares: %+v", orders.KG)
-	}
-	if target.Type != "customers" || target.IDTmpl != "customers:{customer_id}" {
-		t.Fatalf("the far end does not mint the customers node: %+v", target)
-	}
+		if len(h.importer.plans) != 1 {
+			t.Fatalf("the importer got %d plans", len(h.importer.plans))
+		}
+		mapping := h.importer.plans[0]
+
+		customers := mapping.Tables["customers"]
+		if customers.RAG == nil {
+			t.Fatalf("customers got no RAG plan")
+		}
+		if customers.RAG.IDColumn != "id" {
+			t.Fatalf("the primary key should address the chunk, got %q", customers.RAG.IDColumn)
+		}
+		if customers.RAG.Namespace != signed.ID {
+			t.Fatalf("an empty namespace should take the plan id, got %q", customers.RAG.Namespace)
+		}
+		blob, _ := json.Marshal(customers)
+		if strings.Contains(string(blob), "id_card") {
+			t.Fatalf("a dropped column is named in the mapping: %s", blob)
+		}
+		if !strings.Contains(customers.RAG.ContentTmpl, "{email}") {
+			t.Fatalf("the content template lost a kept column: %q", customers.RAG.ContentTmpl)
+		}
+		if customers.KG == nil || len(customers.KG.Entities) != 1 || customers.KG.Entities[0].IDTmpl != "customers:{id}" {
+			t.Fatalf("customers entity: %+v", customers.KG)
+		}
+
+		// A table with no primary key still gets a chunk — importflow synthesizes
+		// "table:row" — but no entity, because a node with no stable id is a node
+		// that duplicates on every re-run.
+		events := mapping.Tables["events"]
+		if events.RAG == nil {
+			t.Fatalf("a keyless table should still be retrievable")
+		}
+		if events.RAG.IDColumn != "" {
+			t.Fatalf("a keyless table has no id column, got %q", events.RAG.IDColumn)
+		}
+		if events.KG != nil {
+			t.Fatalf("a keyless table must not become an entity: %+v", events.KG)
+		}
+
+		// A foreign key becomes an edge, and the far end is emitted as a second
+		// entity keyed on the FK value so the two tables mint one node.
+		orders := mapping.Tables["orders"]
+		if orders.KG == nil || len(orders.KG.Relations) != 1 {
+			t.Fatalf("orders relations: %+v", orders.KG)
+		}
+		rel := orders.KG.Relations[0]
+		if rel.Subject != "orders" || rel.Predicate != "customer" {
+			t.Fatalf("relation: %+v", rel)
+		}
+		var target *importflow.EntityMap
+		for i := range orders.KG.Entities {
+			if orders.KG.Entities[i].Ref == rel.Object {
+				target = &orders.KG.Entities[i]
+			}
+		}
+		if target == nil {
+			t.Fatalf("the edge points at a ref no entity declares: %+v", orders.KG)
+		}
+		if target.Type != "customers" || target.IDTmpl != "customers:{customer_id}" {
+			t.Fatalf("the far end does not mint the customers node: %+v", target)
+		}
+	})
 }
 
 func TestADryRunWritesNothing(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	signed := h.sign(t, h.propose(t))
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		signed := h.sign(t, h.propose(t))
 
-	rep, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: dsnLive, DryRun: true}, "job")
-	if err != nil {
-		t.Fatalf("dry run: %v", err)
-	}
-	if h.importer.runs != 0 {
-		t.Fatalf("a dry run reached the importer")
-	}
-	if !rep.DryRun || rep.RowsRead != 3 || rep.Chunks != 0 {
-		t.Fatalf("dry run report: %+v", rep)
-	}
-	runs, err := h.store.Runs(ctx, signed.ID, 0)
-	if err != nil {
-		t.Fatalf("runs: %v", err)
-	}
-	if len(runs) != 1 || !runs[0].DryRun || runs[0].RowsRead != 3 {
-		t.Fatalf("the dry run should still be recorded: %+v", runs)
-	}
-	if runs[0].ID != rep.ID {
-		t.Fatalf("the recorded run is not the one reported")
-	}
-	// Two opens — the proposal and the run — and both closed behind them.
-	if got, want := h.opener.live.closed.Load(), h.opener.opens.Load(); got != want {
-		t.Fatalf("opened %d sources and closed %d", want, got)
-	}
+		rep, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: h.dsn, DryRun: true}, "job")
+		if err != nil {
+			t.Fatalf("dry run: %v", err)
+		}
+		if h.importer.runs != 0 {
+			t.Fatalf("a dry run reached the importer")
+		}
+		if !rep.DryRun || rep.RowsRead != 3 || rep.Chunks != 0 {
+			t.Fatalf("dry run report: %+v", rep)
+		}
+		runs, err := h.store.Runs(ctx, signed.ID, 0)
+		if err != nil {
+			t.Fatalf("runs: %v", err)
+		}
+		if len(runs) != 1 || !runs[0].DryRun || runs[0].RowsRead != 3 {
+			t.Fatalf("the dry run should still be recorded: %+v", runs)
+		}
+		if runs[0].ID != rep.ID {
+			t.Fatalf("the recorded run is not the one reported")
+		}
+		// dry_run is an INTEGER column holding a Go bool, which is the
+		// column type the two databases are least alike about — and the
+		// timestamps came back as timestamps rather than as strings.
+		if !runs[0].StartedAt.Equal(rep.StartedAt) || !runs[0].EndedAt.Equal(rep.EndedAt) {
+			t.Fatalf("the run's timestamps did not round trip: %v/%v vs %v/%v",
+				runs[0].StartedAt, runs[0].EndedAt, rep.StartedAt, rep.EndedAt)
+		}
+		// The unfiltered listing, with a limit: the other two clauses Runs
+		// builds. On PostgreSQL this reads rows every other test in the run
+		// wrote, so it asserts a bound rather than a count.
+		if any, err := h.store.Runs(ctx, "", 1); err != nil || len(any) != 1 {
+			t.Fatalf("an unfiltered listing limited to 1 returned %d: %v", len(any), err)
+		}
+		// Two opens — the proposal and the run — and both closed behind them.
+		if got, want := h.opener.live.closed.Load(), h.opener.opens.Load(); got != want {
+			t.Fatalf("opened %d sources and closed %d", want, got)
+		}
+	})
 }
 
 // ------------------------------------------------------------------ the chain
 
 func TestTheRunRestsOnTheSignature(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	signed := h.sign(t, h.propose(t))
-	if _, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: dsnLive}, "job-7"); err != nil {
-		t.Fatalf("run: %v", err)
-	}
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		signed := h.sign(t, h.propose(t))
+		if _, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: h.dsn}, "job-7"); err != nil {
+			t.Fatalf("run: %v", err)
+		}
 
-	signs := h.ledger.of(ActSign)
-	if len(signs) != 1 {
-		t.Fatalf("the ledger got %d signatures", len(signs))
-	}
-	sign := signs[0]
-	if sign.Actor != "liliang" || sign.Subject != signed.ID {
-		t.Fatalf("sign act: %+v", sign)
-	}
-	if sign.Detail["hash"] != signed.Hash || sign.Detail["source_key"] != signed.SourceKey {
-		t.Fatalf("the sign act should carry what was signed: %+v", sign.Detail)
-	}
-	if red, _ := sign.Detail["redacted"].(string); strings.Contains(red, "s3cr3t") {
-		t.Fatalf("the ledger got the password")
-	}
-	if _, ok := sign.Detail["counts"].(Counts); !ok {
-		t.Fatalf("the sign act should carry the counts, got %T", sign.Detail["counts"])
-	}
+		signs := h.ledger.of(ActSign)
+		if len(signs) != 1 {
+			t.Fatalf("the ledger got %d signatures", len(signs))
+		}
+		sign := signs[0]
+		if sign.Actor != "liliang" || sign.Subject != signed.ID {
+			t.Fatalf("sign act: %+v", sign)
+		}
+		if sign.Detail["hash"] != signed.Hash || sign.Detail["source_key"] != signed.SourceKey {
+			t.Fatalf("the sign act should carry what was signed: %+v", sign.Detail)
+		}
+		if red, _ := sign.Detail["redacted"].(string); strings.Contains(red, "s3cr3t") {
+			t.Fatalf("the ledger got the password")
+		}
+		if _, ok := sign.Detail["counts"].(Counts); !ok {
+			t.Fatalf("the sign act should carry the counts, got %T", sign.Detail["counts"])
+		}
 
-	runs := h.ledger.of(ActRun)
-	if len(runs) != 1 {
-		t.Fatalf("the ledger got %d runs", len(runs))
-	}
-	// A premise is a SUBJECT, not an act id: this package does not know how
-	// the ledger numbers its entries, and the subject the signature was about
-	// is the plan. The ledger turns that into the entry the signature wrote.
-	if got := runs[0].Premises; len(got) != 1 || got[0] != signed.ID {
-		t.Fatalf("the run should rest on the plan %s, got %v", signed.ID, got)
-	}
-	if runs[0].Actor != "job-7" {
-		t.Fatalf("the run's actor is %q", runs[0].Actor)
-	}
-	if len(h.ledger.of(ActPropose)) != 1 {
-		t.Fatalf("the proposal should be recorded too")
-	}
+		runs := h.ledger.of(ActRun)
+		if len(runs) != 1 {
+			t.Fatalf("the ledger got %d runs", len(runs))
+		}
+		// A premise is a SUBJECT, not an act id: this package does not know how
+		// the ledger numbers its entries, and the subject the signature was about
+		// is the plan. The ledger turns that into the entry the signature wrote.
+		if got := runs[0].Premises; len(got) != 1 || got[0] != signed.ID {
+			t.Fatalf("the run should rest on the plan %s, got %v", signed.ID, got)
+		}
+		if runs[0].Actor != "job-7" {
+			t.Fatalf("the run's actor is %q", runs[0].Actor)
+		}
+		if len(h.ledger.of(ActPropose)) != 1 {
+			t.Fatalf("the proposal should be recorded too")
+		}
+	})
 }
 
 func TestAStoreWithNoLedgerWorks(t *testing.T) {
-	ctx := context.Background()
-	cfg := cortexdb.DefaultConfig(filepath.Join(t.TempDir(), "brain.db"))
-	cfg.Dimensions = 4
-	db, err := cortexdb.Open(cfg)
-	if err != nil {
-		t.Fatalf("open brain: %v", err)
-	}
-	defer func() { _ = db.Close() }()
-
-	s, err := New(db, WithOpener(&fakeOpener{live: liveV1()}), WithImporter(&fakeImporter{}))
-	if err != nil {
-		t.Fatalf("livedb.New: %v", err)
-	}
-	p, err := s.Propose(ctx, Source{Driver: "postgres", DSN: dsnLive}, ProposeOptions{By: "operator"})
-	if err != nil {
-		t.Fatalf("propose: %v", err)
-	}
-	signed, err := s.Sign(ctx, p.ID, p.Hash, "liliang", "")
-	if err != nil {
-		t.Fatalf("sign: %v", err)
-	}
-	if _, err := s.Run(ctx, RunRequest{Plan: signed.ID, DSN: dsnLive}, "job"); err != nil {
-		t.Fatalf("run: %v", err)
-	}
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		s, err := New(b.Open(t), WithOpener(&fakeOpener{live: liveV1()}), WithImporter(&fakeImporter{}))
+		if err != nil {
+			t.Fatalf("livedb.New: %v", err)
+		}
+		dsn, _, _ := uniqueDSN()
+		p, err := s.Propose(ctx, Source{Driver: "postgres", DSN: dsn}, ProposeOptions{By: "operator"})
+		if err != nil {
+			t.Fatalf("propose: %v", err)
+		}
+		signed, err := s.Sign(ctx, p.ID, p.Hash, "liliang", "")
+		if err != nil {
+			t.Fatalf("sign: %v", err)
+		}
+		if _, err := s.Run(ctx, RunRequest{Plan: signed.ID, DSN: dsn}, "job"); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+	})
 }
 
 // -------------------------------------------------------------- checkpoints
 
 func TestCheckpointsRoundTrip(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	cp := h.store.Checkpoints()
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		cp := h.store.Checkpoints()
+		// Unique, because on PostgreSQL this table is shared with every other
+		// test in the run and with every previous run against that database.
+		key, absent := braintest.Unique("src_"), braintest.Unique("src_")
 
-	if _, found, err := cp.Load(ctx, "src_nothing"); err != nil || found {
-		t.Fatalf("an unknown key should be (zero, false, nil), got found=%v err=%v", found, err)
-	}
-	if err := cp.Save(ctx, "src_a", connector.Checkpoint{Cursor: `{"customers":"7"}`}); err != nil {
-		t.Fatalf("save: %v", err)
-	}
-	if err := cp.Save(ctx, "src_a", connector.Checkpoint{Position: "0/16B3748"}); err != nil {
-		t.Fatalf("save again: %v", err)
-	}
-	got, found, err := cp.Load(ctx, "src_a")
-	if err != nil || !found {
-		t.Fatalf("load: found=%v err=%v", found, err)
-	}
-	if got.Position != "0/16B3748" || got.Cursor != "" {
-		t.Fatalf("the second save should have replaced the first: %+v", got)
-	}
+		if _, found, err := cp.Load(ctx, absent); err != nil || found {
+			t.Fatalf("an unknown key should be (zero, false, nil), got found=%v err=%v", found, err)
+		}
+		if err := cp.Save(ctx, key, connector.Checkpoint{Cursor: `{"customers":"7"}`}); err != nil {
+			t.Fatalf("save: %v", err)
+		}
+		if err := cp.Save(ctx, key, connector.Checkpoint{Position: "0/16B3748"}); err != nil {
+			t.Fatalf("save again: %v", err)
+		}
+		got, found, err := cp.Load(ctx, key)
+		if err != nil || !found {
+			t.Fatalf("load: found=%v err=%v", found, err)
+		}
+		if got.Position != "0/16B3748" || got.Cursor != "" {
+			t.Fatalf("the second save should have replaced the first: %+v", got)
+		}
+	})
 }
 
 // ------------------------------------------------------------------ masking
 
 func TestMaskingRendersSignedOnlyWhenSigned(t *testing.T) {
-	h := newHarness(t)
-	p := h.propose(t)
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		h := newHarness(t, b)
+		p := h.propose(t)
 
-	if p.Masking().IsSigned() {
-		t.Fatalf("a draft must render unsigned")
-	}
-	if _, err := connector.NewDesensitizer(p.Masking(), connector.DesensitizerOptions{}); err == nil {
-		t.Fatalf("the connector should refuse a draft's masking plan")
-	}
-	signed := h.sign(t, p)
-	mp := signed.Masking()
-	if !mp.IsSigned() || mp.SignedBy != "liliang" {
-		t.Fatalf("a signed plan should render signed: %+v", mp)
-	}
-	if len(mp.Columns) != len(signed.Columns) {
-		t.Fatalf("the rendering lost columns: %d of %d", len(mp.Columns), len(signed.Columns))
-	}
-	rule, ok := mp.RuleFor("customers", "id_card")
-	if !ok || rule.Action != connector.ActionDrop {
-		t.Fatalf("the rendering lost a decision: %+v", rule)
-	}
-	if _, err := connector.NewDesensitizer(mp, connector.DesensitizerOptions{}); err != nil {
-		t.Fatalf("the connector should accept a signed plan: %v", err)
-	}
+		if p.Masking().IsSigned() {
+			t.Fatalf("a draft must render unsigned")
+		}
+		if _, err := connector.NewDesensitizer(p.Masking(), connector.DesensitizerOptions{}); err == nil {
+			t.Fatalf("the connector should refuse a draft's masking plan")
+		}
+		signed := h.sign(t, p)
+		mp := signed.Masking()
+		if !mp.IsSigned() || mp.SignedBy != "liliang" {
+			t.Fatalf("a signed plan should render signed: %+v", mp)
+		}
+		if len(mp.Columns) != len(signed.Columns) {
+			t.Fatalf("the rendering lost columns: %d of %d", len(mp.Columns), len(signed.Columns))
+		}
+		rule, ok := mp.RuleFor("customers", "id_card")
+		if !ok || rule.Action != connector.ActionDrop {
+			t.Fatalf("the rendering lost a decision: %+v", rule)
+		}
+		if _, err := connector.NewDesensitizer(mp, connector.DesensitizerOptions{}); err != nil {
+			t.Fatalf("the connector should accept a signed plan: %v", err)
+		}
+	})
 }
 
 // ------------------------------------------------------------------- follow
 
 func TestATableWithNoKeyCannotBeFollowed(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t)
-	signed := h.sign(t, h.propose(t))
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		signed := h.sign(t, h.propose(t))
 
-	_, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: dsnLive, Follow: true}, "job")
-	if err == nil {
-		t.Fatalf("following a keyless table should be refused")
-	}
-	if !strings.Contains(err.Error(), "events") {
-		t.Fatalf("the refusal should name the table it is about: %v", err)
-	}
+		_, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: h.dsn, Follow: true}, "job")
+		if err == nil {
+			t.Fatalf("following a keyless table should be refused")
+		}
+		if !strings.Contains(err.Error(), "events") {
+			t.Fatalf("the refusal should name the table it is about: %v", err)
+		}
+	})
 }
 
 // ----------------------------------------------------------- the redaction
@@ -1064,46 +1179,89 @@ func TestDriftOfIsSortedAndByName(t *testing.T) {
 // a source that was being scanned. A review screen that shows less than what
 // ran is the failure the whole package exists to prevent.
 func TestAFreeTextScanIsOnThePlanAndInItsRendering(t *testing.T) {
-	plain := newHarness(t)
-	quiet, err := plain.store.Propose(context.Background(),
-		Source{Driver: "postgres", DSN: dsnLive}, ProposeOptions{By: "operator"})
-	if err != nil {
-		t.Fatalf("propose without scanning: %v", err)
-	}
-
-	h := newHarness(t)
-	scanned, err := h.store.Propose(context.Background(),
-		Source{Driver: "postgres", DSN: dsnLive}, ProposeOptions{By: "operator", ScanText: true})
-	if err != nil {
-		t.Fatalf("propose with scanning: %v", err)
-	}
-
-	var marked []string
-	for _, tr := range scanned.Columns {
-		if tr.Scan {
-			marked = append(marked, tr.Table+"."+tr.Column)
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		h := newHarness(t, b)
+		quiet, err := h.store.Propose(context.Background(),
+			Source{Driver: "postgres", DSN: h.dsn}, ProposeOptions{By: "operator"})
+		if err != nil {
+			t.Fatalf("propose without scanning: %v", err)
 		}
-	}
-	if len(marked) == 0 {
-		t.Fatalf("ScanText marked no column: %+v", scanned.Columns)
-	}
 
-	// The rendering the desensitizer is built from, and the one an auditor
-	// reads, are the same object — so the rules are in it.
-	mp := scanned.Masking()
-	if len(mp.TextScan) != len(marked) {
-		t.Fatalf("the rendering carries %d scan rules for %d marked columns: %+v",
-			len(mp.TextScan), len(marked), mp.TextScan)
-	}
-	for _, name := range marked {
-		table, column, _ := strings.Cut(name, ".")
-		if !mp.TextScanFor(table, column) {
-			t.Errorf("%s is marked on the plan and absent from its rendering", name)
+		// The same source, so the only thing between the two hashes is the
+		// scanning. Two harnesses would have keyed differently and the hashes
+		// would have moved whether or not scanning did anything.
+		scanned, err := h.store.Propose(context.Background(),
+			Source{Driver: "postgres", DSN: h.dsn}, ProposeOptions{By: "operator", ScanText: true})
+		if err != nil {
+			t.Fatalf("propose with scanning: %v", err)
 		}
-	}
 
-	// And it changed what leaves the database, so it changed what was signed.
-	if scanned.Hash == quiet.Hash {
-		t.Errorf("scanning did not move the hash, so a plan could gain it after a signature")
-	}
+		var marked []string
+		for _, tr := range scanned.Columns {
+			if tr.Scan {
+				marked = append(marked, tr.Table+"."+tr.Column)
+			}
+		}
+		if len(marked) == 0 {
+			t.Fatalf("ScanText marked no column: %+v", scanned.Columns)
+		}
+
+		// The rendering the desensitizer is built from, and the one an auditor
+		// reads, are the same object — so the rules are in it.
+		mp := scanned.Masking()
+		if len(mp.TextScan) != len(marked) {
+			t.Fatalf("the rendering carries %d scan rules for %d marked columns: %+v",
+				len(mp.TextScan), len(marked), mp.TextScan)
+		}
+		for _, name := range marked {
+			table, column, _ := strings.Cut(name, ".")
+			if !mp.TextScanFor(table, column) {
+				t.Errorf("%s is marked on the plan and absent from its rendering", name)
+			}
+		}
+
+		// And it changed what leaves the database, so it changed what was signed.
+		if scanned.Hash == quiet.Hash {
+			t.Errorf("scanning did not move the hash, so a plan could gain it after a signature")
+		}
+	})
+}
+
+// A kept text column with no scan is the plan's quietest leak, so it is
+// counted where the reviewer reads the summary.
+//
+// The classifier judges a column, not the sentences in it. A notes field is
+// correctly "not personal" as a column and routinely holds an address
+// somebody typed. Keeping it whole is a legitimate choice; making it silently
+// is not, so the number is on the plan and turning scanning on removes it.
+func TestKeptProseWithNoScanIsCounted(t *testing.T) {
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		open := func(scan bool) Plan {
+			h := newHarness(t, b)
+			p, err := h.store.Propose(context.Background(), Source{Driver: "postgres", DSN: h.dsn},
+				ProposeOptions{By: "operator", DefaultAction: connector.ActionKeep, ScanText: scan})
+			if err != nil {
+				t.Fatalf("propose(scan=%v): %v", scan, err)
+			}
+			return p
+		}
+
+		loose := open(false)
+		if loose.Counts.UnscannedText == 0 {
+			t.Fatalf("text columns were kept whole and none was counted: %+v", loose.Counts)
+		}
+		var kept int
+		for _, tr := range loose.Columns {
+			if tr.Type == "text" && tr.Action == connector.ActionKeep {
+				kept++
+			}
+		}
+		if loose.Counts.UnscannedText != kept {
+			t.Errorf("counted %d unscanned text columns, %d were kept", loose.Counts.UnscannedText, kept)
+		}
+
+		if scanned := open(true); scanned.Counts.UnscannedText != 0 {
+			t.Errorf("scanning left %d columns counted as unscanned", scanned.Counts.UnscannedText)
+		}
+	})
 }

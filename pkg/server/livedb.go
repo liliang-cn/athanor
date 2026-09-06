@@ -93,7 +93,20 @@ func (s *Server) livedb() (livedbStore, error) {
 	entry, _ := livedbStores.LoadOrStore(s.db, &livedbHandle{})
 	h := entry.(*livedbHandle)
 	h.once.Do(func() {
-		h.store, h.err = livedb.New(s.db, livedb.WithLedger(livedbLedger{srv: s}))
+		opts := []livedb.Option{livedb.WithLedger(livedbLedger{srv: s})}
+		// The vault, when this deployment has one. Without it the store
+		// refuses to sign a plan holding a reversible treatment, naming the
+		// columns — which is the right refusal and not an error here: a
+		// deployment that does no reversible masking needs no vault.
+		vault, provider, tenant, err := s.vault()
+		if err != nil {
+			h.err = err
+			return
+		}
+		if vault != nil {
+			opts = append(opts, livedb.WithVault(vault, provider, tenant))
+		}
+		h.store, h.err = livedb.New(s.db, opts...)
 	})
 	if h.err != nil {
 		return nil, h.err

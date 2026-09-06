@@ -14,6 +14,9 @@
 //	ATHANOR_SPOOL       where uploaded sources wait; default the OS temp dir
 //	ATHANOR_LIVEDB_HOSTS  host or host:port list /athanor/livedb may dial,
 //	                      comma-separated; empty is unconfined
+//	ATHANOR_VAULT         where reversible masking keeps its originals
+//	ATHANOR_VAULT_KEY     the vault key file; with none there is no vault
+//	ATHANOR_VAULT_TENANT  names this deployment's tokens in a shared vault
 //	OPENAI_BASE_URL etc the brain's embedder, exactly as cortexdb-grpc reads them
 //
 // `athanor -health` probes a running server's gRPC port and exits non-zero
@@ -82,6 +85,12 @@ func main() {
 		health   = flag.Bool("health", false, "probe a running server at -addr and exit")
 		liveHost = flag.String("livedb-hosts", envOr("ATHANOR_LIVEDB_HOSTS", ""),
 			"comma-separated host or host:port list pkg/livedb may dial; empty is unconfined")
+		vaultPath = flag.String("vault", envOr("ATHANOR_VAULT", ""),
+			"where reversible masking keeps its originals; empty is vault.db beside the brain")
+		vaultKey = flag.String("vault-key", envOr("ATHANOR_VAULT_KEY", ""),
+			"file holding the vault key (32 raw bytes or 64 hex chars); with none there is no vault")
+		vaultTenant = flag.String("vault-tenant", envOr("ATHANOR_VAULT_TENANT", ""),
+			"names this deployment's tokens in a shared vault file; empty is \"athanor\"")
 	)
 	flag.Parse()
 
@@ -113,7 +122,8 @@ func main() {
 		DBPath: *dbPath, GRPCAddr: *grpcAddr, HTTPAddr: *httpAddr,
 		KeyFile: *keyFile, Token: *token, BackupDir: *backup, Spool: *spool,
 		LiveDBHosts: hostList(*liveHost),
-		Embedder:    emb,
+		VaultPath:   *vaultPath, VaultKeyFile: *vaultKey, VaultTenant: *vaultTenant,
+		Embedder: emb,
 	})
 	if err != nil {
 		log.Fatal(err)

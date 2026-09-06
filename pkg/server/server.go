@@ -61,11 +61,14 @@ type Server struct {
 	follows     *livedbFollowSet
 	followCtx   context.Context
 	stopFollows context.CancelFunc
-	metrics     *observability.Registry
-	grpc        *grpc.Server
-	mux         *http.ServeMux
-	http        *http.Server
-	view        *liveview.Server
+	// vaultOnce is where reversible masking keeps its originals, opened on
+	// first use and never inside the brain (vault.go).
+	vaultOnce vaultHandle
+	metrics   *observability.Registry
+	grpc      *grpc.Server
+	mux       *http.ServeMux
+	http      *http.Server
+	view      *liveview.Server
 
 	gatewayConn   *grpc.ClientConn
 	stopGateway   context.CancelFunc
@@ -191,6 +194,7 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	// resource with a lifetime and not a flag on a run (livedb_follows.go).
 	mux.HandleFunc("/athanor/livedb/follows", s.handleLivedbFollows)
 	mux.HandleFunc("/athanor/livedb/follows/{id}", s.handleLivedbFollow)
+	mux.HandleFunc("/athanor/livedb/unmask", s.handleLivedbUnmask)
 	// The ledger: what this server did, and why. Reads only — an entry is
 	// written by performing the act it describes (ledger.go). The id pattern
 	// takes the rest of the path because a decision id carries colons and a
@@ -303,5 +307,7 @@ func (s *Server) Close() error {
 	if s.view != nil {
 		_ = s.view.Close()
 	}
+	// After the follows, because a follow may be writing a token into it.
+	_ = s.closeVault()
 	return s.db.Close()
 }
