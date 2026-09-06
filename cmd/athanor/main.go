@@ -12,6 +12,8 @@
 //	ATHANOR_TOKEN       legacy single key; ignored when a key file is set
 //	ATHANOR_BACKUP_DIR  where AdminService.Backup may write
 //	ATHANOR_SPOOL       where uploaded sources wait; default the OS temp dir
+//	ATHANOR_LIVEDB_HOSTS  host or host:port list /athanor/livedb may dial,
+//	                      comma-separated; empty is unconfined
 //	OPENAI_BASE_URL etc the brain's embedder, exactly as cortexdb-grpc reads them
 //
 // `athanor -health` probes a running server's gRPC port and exits non-zero
@@ -25,6 +27,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -43,6 +46,19 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// hostList reads the live-database allow-list. An empty string is no list at
+// all, which is unconfined — and not a list of one empty host, which would
+// confine the server to nothing and read on the front page as the same thing.
+func hostList(raw string) []string {
+	var out []string
+	for _, entry := range strings.Split(raw, ",") {
+		if entry = strings.TrimSpace(entry); entry != "" {
+			out = append(out, entry)
+		}
+	}
+	return out
 }
 
 func defaultDB() string {
@@ -64,6 +80,8 @@ func main() {
 		backup   = flag.String("backup-dir", envOr("ATHANOR_BACKUP_DIR", ""), "directory AdminService.Backup may write into")
 		spool    = flag.String("spool", envOr("ATHANOR_SPOOL", ""), "directory uploaded sources wait in")
 		health   = flag.Bool("health", false, "probe a running server at -addr and exit")
+		liveHost = flag.String("livedb-hosts", envOr("ATHANOR_LIVEDB_HOSTS", ""),
+			"comma-separated host or host:port list pkg/livedb may dial; empty is unconfined")
 	)
 	flag.Parse()
 
@@ -94,7 +112,8 @@ func main() {
 	s, err := server.New(ctx, server.Options{
 		DBPath: *dbPath, GRPCAddr: *grpcAddr, HTTPAddr: *httpAddr,
 		KeyFile: *keyFile, Token: *token, BackupDir: *backup, Spool: *spool,
-		Embedder: emb,
+		LiveDBHosts: hostList(*liveHost),
+		Embedder:    emb,
 	})
 	if err != nil {
 		log.Fatal(err)

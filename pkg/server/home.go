@@ -81,6 +81,15 @@ nav a{margin-right:1.2rem}form.in input{font:inherit;padding:.4rem .6rem;width:2
   <input name="job" placeholder="job id"> <input name="load" placeholder="load name (optional)" style="width:14rem">
   <button>Load</button>
 </form>
+<h2>Import from a database somebody else runs</h2>
+<p class="muted">Three steps and the order is the point: <code>POST /athanor/livedb/plans</code> reads the schema and drafts a plan,
+<code>POST /athanor/livedb/plans/{id}/signature</code> signs the hash you read, and <code>POST /athanor/livedb/runs</code> imports under
+what was signed. Nothing reads a row until somebody has signed for what leaves the database, and
+<code>GET /athanor/livedb/plans/current?source_key=</code> says which plan that is.</p>
+<p class="muted">There is no form here. The connection string is a password and this page would carry it through a redirect,
+a browser history and this server's own notice — so a run is made with a bearer key or not at all. The plan keeps the redacted
+form of the string; the credential is supplied again on every run and is never stored, never shown and never in the ledger.</p>
+
 {{if .Notice}}<p>{{.Notice}}</p>{{end}}
 {{end}}
 `))

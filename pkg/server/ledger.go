@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/liliang-cn/athanor/pkg/livedb"
 	"github.com/liliang-cn/athanor/pkg/ontologies"
 	"github.com/liliang-cn/cortexdb/v2/pkg/authz"
 	"github.com/liliang-cn/cortexdb/v2/pkg/cortexdb"
@@ -23,13 +24,14 @@ import (
 // it back. Everything an agent decided through decision_record over MCP or
 // gRPC has been landing there since. Nothing Athanor itself did was.
 //
-// Athanor performs four kinds of act and three of them are exactly what a
+// Athanor performs five kinds of act and four of them are exactly what a
 // ledger is for: a load (a graph entered the brain), a review decision (a
-// person accepted, rejected or edited a finding), and an ontology act (a
-// vocabulary was drafted, proposed against, approved, published, retired).
-// The fourth — an agent's own decision — already arrives. This file records
-// the other three in the same store, in the same shape, so one query answers
-// all four.
+// person accepted, rejected or edited a finding), an ontology act (a
+// vocabulary was drafted, proposed against, approved, published, retired),
+// and a live-database act (a plan was proposed, signed, and run against a
+// database somebody else runs). The fifth — an agent's own decision — already
+// arrives. This file records the other four in the same store, in the same
+// shape, so one query answers all five.
 //
 // # Who the actor is
 //
@@ -70,7 +72,9 @@ import (
 //
 // A load's entry is `decision:athanor:load:<job>:<load>`, a review's is
 // `decision:athanor:review:<job>:<item>`, an ontology act's is
-// `decision:athanor:ontology:<act id>`. RecordDecision treats a supplied id
+// `decision:athanor:ontology:<act id>`, and a live-database plan's is
+// `decision:athanor:livedb:plan:<plan>` with its runs at
+// `decision:athanor:livedb:run:<run>`. RecordDecision treats a supplied id
 // as an upsert, so re-running a load under the same name updates one entry
 // rather than growing a second — the same property that lets an agent replay
 // a transcript without doubling its ledger. It is also what lets a load find
@@ -90,6 +94,8 @@ const (
 func loadDecisionID(job, load string) string   { return "athanor:load:" + job + ":" + load }
 func reviewDecisionID(job, item string) string { return "athanor:review:" + job + ":" + item }
 func ontologyDecisionID(actID string) string   { return "athanor:ontology:" + actID }
+func livedbPlanDecisionID(plan string) string  { return "athanor:livedb:plan:" + plan }
+func livedbRunDecisionID(run string) string    { return "athanor:livedb:run:" + run }
 func ledgerTrim(s string) string               { return strings.TrimSpace(s) }
 
 // ledgerEntry is one act of Athanor's, in the shape RecordDecision takes.
@@ -240,6 +246,129 @@ func (l ontologyLedger) Record(ctx context.Context, act ontologies.Act) error {
 	}
 	_, err := l.srv.ledger.record(ctx, entry)
 	return err
+}
+
+// livedbLedger is pkg/livedb's Ledger, implemented against the brain. It
+// holds the Server for ontologyLedger's reason: the store it is given to is
+// built once per brain and cached, while the ledger is a field a test
+// replaces, and reading it at call time is what keeps the two from drifting.
+//
+// # Two acts, one entry
+//
+// A proposal and the signature that follows it are the same plan, so they are
+// the same entry: `athanor:livedb:plan:<plan id>`, whose verdict goes from
+// "proposed" to "signed" when somebody signs. RecordDecision treats a
+// supplied id as an upsert, which is what makes that an update rather than a
+// second entry claiming the plan was proposed twice. A run is its own thing
+// and gets its own: `athanor:livedb:run:<run id>`.
+//
+// # The actor
+//
+// livedb.Act carries one Actor field, and by the time an act reaches here it
+// may hold the name a signer typed into the request body rather than the key
+// that presented itself. So the actor is read from the context, where the
+// handler parked the key authorization resolved (withCallerKey) — the same
+// mechanism the gRPC ledger hooks use, for the same reason. A free-text name
+// that disagrees with it is kept in the detail, verbatim, under `by`.
+type livedbLedger struct{ srv *Server }
+
+func (l livedbLedger) Record(ctx context.Context, act livedb.Act) error {
+	actor := callerKey(ctx).ID
+	detail := map[string]any{"act": act.ID}
+	if act.Subject != "" {
+		detail["subject"] = act.Subject
+	}
+	// The name the act was signed with, when it is not the key that called.
+	// Nothing here promotes it to the actor; a ledger whose actor can be
+	// typed by the caller is a ledger that cannot be used as evidence.
+	if by := ledgerTrim(act.Actor); by != "" && by != actor {
+		detail["by"] = by
+	}
+	if act.Note != "" {
+		detail["note"] = act.Note
+	}
+	for k, v := range act.Detail {
+		if _, taken := detail[k]; !taken {
+			detail[k] = v
+		}
+	}
+
+	// Act.Subject is what the act was about, and it is the only field that
+	// says so: Act.ID is a freshly minted id for the act itself, different on
+	// every call, so an entry keyed by it would be a new entry every time and
+	// a signature would never find the proposal it is amending.
+	subject := firstNonBlank(act.Subject, act.ID)
+	var id, verdict, note string
+	switch act.Kind {
+	case livedb.ActPropose:
+		id, verdict = livedbPlanDecisionID(subject), "proposed"
+		note = fmt.Sprintf("proposed a plan for reading %s: %s", subject, act.Note)
+	case livedb.ActSign:
+		id, verdict = livedbPlanDecisionID(subject), "signed"
+		note = fmt.Sprintf("signed the plan %s: %s", subject, act.Note)
+	case livedb.ActRun:
+		id, verdict = livedbRunDecisionID(subject), "ran"
+		note = fmt.Sprintf("ran the import %s: %s", subject, act.Note)
+	default:
+		return fmt.Errorf("athanor: ledger: %s is not one of this package's acts", act.Kind)
+	}
+
+	entry := ledgerEntry{
+		ID:       id,
+		Kind:     act.Kind,
+		Actor:    actor,
+		Verdict:  verdict,
+		Subject:  act.Subject,
+		Note:     strings.TrimSpace(note),
+		Detail:   detail,
+		Premises: livedbPremises(act),
+	}
+	_, err := l.srv.ledger.record(ctx, entry)
+	return err
+}
+
+// livedbPremises names the entries a livedb act rests on.
+//
+// A run rests on the signature that permitted it, so that "where did this
+// node come from" walks back to a signature and from there to the column it
+// was made of. Finding that entry needs one translation, because the two
+// packages number things differently: pkg/livedb offers the signing *act's*
+// own id, which is minted per act and is not an entry in anybody's ledger,
+// while the entry the signature actually wrote is the plan's —
+// athanor:livedb:plan:<plan>, the same one the proposal wrote and the
+// signature updated. A run's detail names its plan, so the entry is derived
+// from that rather than looked up.
+//
+// Whatever livedb did offer is passed through as well, prefixed the way
+// loads.go prefixes the review decisions a load rests on. An id that names no
+// entry costs nothing: brainLedger.existing drops the premises the brain does
+// not hold, so a premise that was never recorded costs one premise and not
+// the whole entry.
+func livedbPremises(act livedb.Act) []string {
+	ids := make([]string, 0, len(act.Premises)+1)
+	if act.Kind == livedb.ActRun {
+		if plan, _ := act.Detail["plan"].(string); ledgerTrim(plan) != "" {
+			ids = append(ids, livedbPlanDecisionID(ledgerTrim(plan)))
+		}
+	}
+	ids = append(ids, act.Premises...)
+
+	out := make([]string, 0, len(ids))
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		if id = ledgerTrim(id); id == "" {
+			continue
+		}
+		if id = cortexdb.DecisionID(id); !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
 }
 
 func firstNonBlank(values ...string) string {

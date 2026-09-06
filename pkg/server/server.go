@@ -47,6 +47,13 @@ type Server struct {
 
 	alchemy *service.Server
 	ledger  ledger
+	// liveDB, when set, is where the live-database routes get their store.
+	// Nil is the real one, built once per brain on first use (livedb.go).
+	// It is a function rather than a store so that a test can express both
+	// halves of what those handlers face — a working store, and a store that
+	// could not be built — without either depending on how far pkg/livedb's
+	// own implementation has got.
+	liveDB  func() (livedbStore, error)
 	metrics *observability.Registry
 	grpc    *grpc.Server
 	mux     *http.ServeMux
@@ -162,6 +169,15 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux.HandleFunc("/athanor/ontologies", s.handleOntologies)
 	mux.HandleFunc("/athanor/ontologies/current", s.handleOntologyCurrent)
 	mux.HandleFunc("/athanor/ontologies/{id}", s.handleOntologyVersion)
+	// A database somebody else runs: propose a plan from its schema, sign the
+	// hash you read, and only then import (livedb.go). "current" is a literal
+	// segment and Go's mux prefers it to {id}, exactly as it does for the
+	// ontologies above.
+	mux.HandleFunc("/athanor/livedb/plans", s.handleLivedbPlans)
+	mux.HandleFunc("/athanor/livedb/plans/current", s.handleLivedbCurrent)
+	mux.HandleFunc("/athanor/livedb/plans/{id}", s.handleLivedbPlan)
+	mux.HandleFunc("/athanor/livedb/plans/{id}/signature", s.handleLivedbSignature)
+	mux.HandleFunc("/athanor/livedb/runs", s.handleLivedbRuns)
 	// The ledger: what this server did, and why. Reads only — an entry is
 	// written by performing the act it describes (ledger.go). The id pattern
 	// takes the rest of the path because a decision id carries colons and a

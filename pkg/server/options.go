@@ -36,6 +36,11 @@ type Options struct {
 	// alchemy's default.
 	JobCapacity int
 
+	// LiveDBHosts confines which databases pkg/livedb may dial, as host or
+	// host:port entries. Empty is unconfined, which is the right default for a
+	// single-operator deployment and the wrong one for a shared Athanor.
+	LiveDBHosts []string
+
 	// Embedder, when set, is the brain's. Nil is lexical mode, which is a
 	// supported path and the one the review pipeline's own connector refuses
 	// to bypass: it never lets the store embed what alchemy did not.
