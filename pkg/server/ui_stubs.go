@@ -8,22 +8,6 @@ import "net/http"
 // so that the routes can be registered once, in server.go, and neither author
 // has to touch that file.
 
-func (s *Server) handleUIImport(w http.ResponseWriter, r *http.Request) {
-	s.uiNotYet(w, r, "Import", "/app/import")
-}
-
-func (s *Server) handleUIImportLiveDB(w http.ResponseWriter, r *http.Request) {
-	s.uiNotYet(w, r, "Import from a live database", "/app/import")
-}
-
-func (s *Server) handleUIImportRuns(w http.ResponseWriter, r *http.Request) {
-	s.uiNotYet(w, r, "Runs", "/app/import")
-}
-
-func (s *Server) handleUIImportFollows(w http.ResponseWriter, r *http.Request) {
-	s.uiNotYet(w, r, "Follows", "/app/import")
-}
-
 func (s *Server) uiNotYet(w http.ResponseWriter, r *http.Request, title, nav string) {
 	if _, ok := s.uiKey(w, r); !ok {
 		return
