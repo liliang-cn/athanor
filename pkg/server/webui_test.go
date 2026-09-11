@@ -3,9 +3,11 @@ package server
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 // The interface reaches every route with a cookie, so every route must accept
@@ -130,4 +132,42 @@ func readAll(t *testing.T, resp *http.Response) string {
 		}
 	}
 	return sb.String()
+}
+
+// index.html must not be cached, and the hashed assets must be.
+//
+// Every build renames the bundle, which is the whole point of the hash: a
+// browser may keep an asset forever because a changed asset has a different
+// name. index.html is the one file that keeps its name, so a browser that
+// reuses yesterday's copy asks for a bundle this deploy no longer has and
+// renders nothing — a blank product, after a deploy that went fine. Go's file
+// server sets no Cache-Control of its own and leaves it to the browser's
+// heuristic, which caches. So the handler has to say so, on the path that
+// serves a file that exists as well as on the fallback.
+func TestTheIndexIsNeverCachedAndTheAssetsAlwaysAre(t *testing.T) {
+	dist := fstest.MapFS{
+		"index.html":              {Data: []byte("<!doctype html>")},
+		"assets/index-abc123.js":  {Data: []byte("console.log(1)")},
+		"assets/index-abc123.css": {Data: []byte("body{}")},
+	}
+	h := webAssets(dist)
+	for _, tc := range []struct {
+		path string
+		want string
+		why  string
+	}{
+		{"/", "no-store", "the entry page names this build's bundle and nothing else"},
+		{"/index.html", "no-store", "the same file reached by its own name"},
+		{"/decisions/abc", "no-store", "a deep link the router answers with the entry page"},
+		{"/assets/index-abc123.js", "public, max-age=31536000, immutable", "a hashed name never changes meaning"},
+		{"/assets/index-abc123.css", "public, max-age=31536000, immutable", "likewise"},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			if got := rec.Header().Get("Cache-Control"); got != tc.want {
+				t.Fatalf("%s carries Cache-Control %q, want %q — %s", tc.path, got, tc.want, tc.why)
+			}
+		})
+	}
 }

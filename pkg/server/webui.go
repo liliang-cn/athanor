@@ -191,9 +191,18 @@ func webAssets(dist fs.FS) http.Handler {
 		}
 		if f, err := dist.Open(clean); err == nil {
 			_ = f.Close()
-			// Hashed asset names are immutable; index.html is not.
+			// Hashed asset names are immutable; index.html is not, and it is
+			// the one file a stale copy breaks the product with. Every deploy
+			// renames the assets, so a browser that reuses yesterday's
+			// index.html asks for a bundle that is no longer there and renders
+			// nothing at all. Without a header of our own the file server
+			// leaves it to the browser's heuristic, which caches it — so this
+			// says no-store on both paths that can serve it, not only on the
+			// fallback.
 			if strings.HasPrefix(clean, "assets/") {
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			} else {
+				w.Header().Set("Cache-Control", "no-store")
 			}
 			files.ServeHTTP(w, r)
 			return
