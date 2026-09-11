@@ -166,13 +166,32 @@ export interface RunReport {
   errors?: string[];
 }
 
+/**
+ * A follow keeping the brain in step with a live database.
+ *
+ * Mirrored field for field from `livedbFollowView` in
+ * pkg/server/livedb_follows.go. The first version of this interface was
+ * written from memory and had a `running: boolean` the server has never sent,
+ * which is exactly the failure hand-mirroring is supposed to make loud: a
+ * change to that struct has to change this one in the same commit.
+ */
 export interface Follow {
   id: string;
   plan: string;
-  source_key: string;
+  source_key?: string;
+  /** The connection string with the password gone. The credential itself is
+   *  never in a response and never in this type. */
   redacted?: string;
+  namespace?: string;
+  state: "running" | "stopped";
   started_at: string;
   stopped_at?: string;
-  running: boolean;
+  /** Why it stopped, already scrubbed of the credential the start carried. A
+   *  follow that stopped for a reason stays listed until somebody clears it,
+   *  so an operator learns why rather than finding it simply gone. */
   error?: string;
+  /** The initial import's report, which exists only once the whole follow has
+   *  ended: Run reports the pass it began with when it returns, and it
+   *  returns when the following is over. */
+  first_pass?: RunReport;
 }

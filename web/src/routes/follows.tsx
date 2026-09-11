@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Empty, LoadFailed } from "@/components/empty";
 import { api, ApiError } from "@/lib/api";
 import { useSession } from "@/lib/session";
-import type { Plan } from "@/lib/types";
+import type { Follow, Plan } from "@/lib/types";
 
 /**
  * What is keeping the brain in step with a database somebody else runs.
@@ -37,48 +37,15 @@ import type { Plan } from "@/lib/types";
  * plan already carries.
  */
 
-/**
- * One follow, as the server actually answers it.
- *
- * NOT `Follow` from lib/types.ts. That type says `running: boolean`; the
- * server sends `state: "running" | "stopped"`, and it also sends `namespace`
- * and `first_pass`, which the shared type does not have — see
- * livedbFollowView in pkg/server/livedb_follows.go. The shared file is left
- * alone deliberately rather than corrected here, because it is the one file
- * every screen imports; this shape is what this screen reads, and the two
- * should be reconciled in a commit that owns types.ts.
- */
-interface FollowView {
-  id: string;
-  plan: string;
-  source_key?: string;
-  redacted?: string;
-  namespace?: string;
-  state: "running" | "stopped" | string;
-  started_at: string;
-  stopped_at?: string;
-  /** Why it stopped, already scrubbed of the credential the start carried. */
-  error?: string;
-  first_pass?: {
-    id: string;
-    rows_read: number;
-    chunks: number;
-    triples: number;
-    skipped: number;
-    drift?: string[];
-    gone?: string[];
-  };
-}
-
 interface FollowsAnswer {
-  follows: FollowView[];
+  follows: Follow[];
 }
 interface PlansAnswer {
   plans: Plan[];
 }
 /** POST answers 202 with the follow and the sentence about what 202 means. */
 interface StartedAnswer {
-  follow: FollowView;
+  follow: Follow;
   note?: string;
 }
 
@@ -114,7 +81,7 @@ export function Follows() {
   const { session } = useSession();
   const mayWrite = session?.can_write ?? false;
 
-  const [follows, setFollows] = useState<FollowView[] | null>(null);
+  const [follows, setFollows] = useState<Follow[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [plans, setPlans] = useState<Plan[] | null>(null);
   const [plansError, setPlansError] = useState<string | null>(null);
@@ -203,7 +170,7 @@ export function Follows() {
     setStopping(id);
     setStopError(null);
     try {
-      await api.del<{ follow: FollowView }>(`/athanor/livedb/follows/${encodeURIComponent(id)}`);
+      await api.del<{ follow: Follow }>(`/athanor/livedb/follows/${encodeURIComponent(id)}`);
       await load();
     } catch (err) {
       if (err instanceof ApiError && err.isForbidden) {
