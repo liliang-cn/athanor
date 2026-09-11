@@ -54,7 +54,7 @@ const uiLedgerDepth = 0
 var ledgerListTmpl = template.Must(template.New("decisions").Parse(`
 <div class="card">
   <form method="get" action="/app/decisions" class="row">
-    <div><label for="f-kind">kind</label>
+    <div class="grow" style="--grow-min:14rem"><label for="f-kind">kind</label>
       <input id="f-kind" name="kind" value="{{.Query.Kind}}" placeholder="load, review, ontology.approve…" size="22"></div>
     <div><label for="f-subject">subject</label>
       <input id="f-subject" name="subject" value="{{.Query.Subject}}" placeholder="what it was about" size="20"></div>
@@ -76,14 +76,14 @@ var ledgerListTmpl = template.Must(template.New("decisions").Parse(`
     {{if .Filtered}}<p class="empty">Nothing in the ledger matches that filter.</p>
     {{else}}<p class="empty">The ledger holds nothing yet. An entry is written by performing an act — loading a job, deciding a finding, signing a plan — not by posting one here.</p>{{end}}
   {{else}}
-  <div class="scroll"><table>
-    <tr><th>when</th><th>kind</th><th>verdict</th><th>actor</th><th>what</th></tr>
+  <div class="scroll"><table class="cards">
+    <tr class="hd"><th>when</th><th>kind</th><th>verdict</th><th>actor</th><th>what</th></tr>
     {{range .Rows}}<tr>
-      <td class="muted">{{.At}}</td>
-      <td><a href="/app/decisions?kind={{.Kind}}"><code>{{.Kind}}</code></a></td>
-      <td><span class="pill {{.VerdictClass}}">{{.Verdict}}</span></td>
-      <td>{{.Actor}}</td>
-      <td><a href="/app/decisions/{{.Href}}">{{if .Line}}{{.Line}}{{else}}{{.ID}}{{end}}</a></td>
+      <td class="muted" data-label="when">{{.At}}</td>
+      <td data-label="kind"><a href="/app/decisions?kind={{.Kind}}"><code>{{.Kind}}</code></a></td>
+      <td data-label="verdict"><span class="pill {{.VerdictClass}}">{{.Verdict}}</span></td>
+      <td data-label="actor">{{.Actor}}</td>
+      <td class="id" data-label="what"><a href="/app/decisions/{{.Href}}">{{if .Line}}{{.Line}}{{else}}{{.ID}}{{end}}</a></td>
     </tr>{{end}}
   </table></div>
   {{end}}
@@ -118,13 +118,13 @@ var ledgerChainTmpl = template.Must(template.New("decision").Parse(`
 <div class="card">
   <h2 style="margin-top:0">What it rests on</h2>
   {{if not .Premises}}<p class="empty">Nothing. This entry stands on its own.</p>
-  {{else}}<div class="scroll"><table>
-    <tr><th>premise</th><th>grade</th><th>kind</th></tr>
+  {{else}}<div class="scroll"><table class="cards">
+    <tr class="hd"><th>premise</th><th>grade</th><th>kind</th></tr>
     {{range .Premises}}<tr>
-      <td>{{if .Href}}<a href="/app/decisions/{{.Href}}">{{.Label}}</a>{{else}}{{.Label}}{{end}}
+      <td class="id" data-label="premise">{{if .Href}}<a href="/app/decisions/{{.Href}}">{{.Label}}</a>{{else}}{{.Label}}{{end}}
         {{if .Missing}}<br><span class="g-refused">recorded, and no longer on the shelf</span>{{end}}</td>
-      <td>{{if .Grade}}<code class="g-{{.Grade}}">{{.Grade}}</code>{{else}}<span class="muted">none</span>{{end}}</td>
-      <td class="muted">{{if .Decision}}decision{{else}}{{.Type}}{{end}}</td>
+      <td data-label="grade">{{if .Grade}}<code class="g-{{.Grade}}">{{.Grade}}</code>{{else}}<span class="muted">none</span>{{end}}</td>
+      <td class="muted" data-label="kind">{{if .Decision}}decision{{else}}{{.Type}}{{end}}</td>
     </tr>{{end}}
   </table></div>{{end}}
 </div>
@@ -135,14 +135,14 @@ var ledgerChainTmpl = template.Must(template.New("decision").Parse(`
   {{else}}
   <p class="muted">{{len .Chain}} further decision{{if ne (len .Chain) 1}}s{{end}} in {{.Depth}} hop{{if ne .Depth 1}}s{{end}}.
     <code>GET {{.APIPath}}</code> answers the same from a script.</p>
-  <div class="scroll"><table>
-    <tr><th>when</th><th>kind</th><th>verdict</th><th>actor</th><th>what</th></tr>
+  <div class="scroll"><table class="cards">
+    <tr class="hd"><th>when</th><th>kind</th><th>verdict</th><th>actor</th><th>what</th></tr>
     {{range .Chain}}<tr>
-      <td class="muted">{{.At}}</td>
-      <td><code>{{.Kind}}</code></td>
-      <td><span class="pill {{.VerdictClass}}">{{.Verdict}}</span></td>
-      <td>{{.Actor}}</td>
-      <td><a href="/app/decisions/{{.Href}}">{{if .Line}}{{.Line}}{{else}}{{.ID}}{{end}}</a></td>
+      <td class="muted" data-label="when">{{.At}}</td>
+      <td data-label="kind"><code>{{.Kind}}</code></td>
+      <td data-label="verdict"><span class="pill {{.VerdictClass}}">{{.Verdict}}</span></td>
+      <td data-label="actor">{{.Actor}}</td>
+      <td class="id" data-label="what"><a href="/app/decisions/{{.Href}}">{{if .Line}}{{.Line}}{{else}}{{.ID}}{{end}}</a></td>
     </tr>{{end}}
   </table></div>
   {{if .Truncated}}<p class="g-refused">The walk stopped at the depth bound with decisions still unvisited — this is not the whole account.</p>{{end}}

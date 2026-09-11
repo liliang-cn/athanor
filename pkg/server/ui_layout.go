@@ -42,7 +42,7 @@ const uiCSS = `
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);
   font:15px/1.55 -apple-system,"SF Pro Text",system-ui,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
-code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.9em;overflow-wrap:break-word}
 a{color:var(--accent);text-decoration:none}a:hover{color:var(--accent-ink);text-decoration:underline}
 .shell{display:grid;grid-template-columns:200px 1fr;min-height:100vh}
 .rail{background:var(--panel);border-right:1px solid var(--line);padding:1.1rem .75rem;display:flex;flex-direction:column;gap:.15rem}
@@ -51,6 +51,9 @@ a{color:var(--accent);text-decoration:none}a:hover{color:var(--accent-ink);text-
 .rail a:hover{background:var(--bg);text-decoration:none}
 .rail a[aria-current="page"]{background:#eaf0fe;color:var(--accent-ink);font-weight:500}
 .rail .out{margin-top:auto;padding-top:1rem;border-top:1px solid var(--line);color:var(--dim);font-size:.85rem}
+.rail .signout{margin-top:.5rem}
+.rail .signout button{font-size:.85rem}
+.rail-links{display:contents}
 .main{padding:1.6rem 2rem 4rem;max-width:64rem}
 .top{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;margin-bottom:1.4rem}
 h1{font-size:1.35rem;font-weight:600;letter-spacing:-.01em;margin:0}
@@ -75,16 +78,130 @@ input,select,textarea{font:inherit;padding:.4rem .6rem;border:1px solid var(--li
   background:var(--panel);color:var(--ink);max-width:100%}
 label{display:block;font-size:.85rem;color:var(--dim);margin:.7rem 0 .2rem}
 .row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:flex-end}
+.grow{flex:1;min-width:var(--grow-min,18rem)}
 .notice{background:#eaf0fe;border:1px solid #c7d7fb;border-radius:var(--r1);padding:.6rem .8rem;margin-bottom:1rem}
 .notice.bad{background:#fdeceb;border-color:#f3c3bf;color:var(--bad)}
 .empty{color:var(--dim);padding:.6rem 0}
 .scroll{overflow-x:auto}
+/* Below here a screen is a phone screen, and the desktop layout is not
+   merely narrower — it is a different arrangement of the same markup and the
+   same words. Four things change: the rail becomes a fixed bottom bar, the
+   row-shaped tables become cards, every form control goes full width at a
+   font size iOS will not zoom, and nothing is allowed to push the page
+   sideways.
+
+   # Why a bottom bar rather than a top one
+
+   Six destinations do not fit one readable top strip at 390px, and the two
+   ways round that are both worse than a bar. A strip that scrolls sideways
+   hides destinations behind an affordance nobody sees, and — the part that
+   settles it — CSS alone cannot scroll the current tab into view, so on
+   Decisions, the last entry, the strip would show four tabs and none of them
+   marked. A strip that wraps to two rows is the layout this replaces: it
+   costs ~90px of every scroll position and still sits at the top, where a
+   thumb on a 6.1-inch phone does not comfortably reach.
+
+   The bottom bar is one row of six equal cells, 54px tall, always in reach
+   and always showing which page you are on. What is NOT in it is Sign out:
+   it lives in the header at the top of the page, deliberately far from the
+   thumb, because the one control that ends the session should not sit a
+   mis-tap away from the one you use to move between screens. */
 @media (max-width:760px){
+  /* The header: brand, who you are, and the way out. */
   .shell{grid-template-columns:1fr}
-  .rail{flex-direction:row;flex-wrap:wrap;align-items:center;border-right:0;border-bottom:1px solid var(--line);padding:.6rem}
-  .rail .brand{padding:.2rem .55rem;width:100%}
-  .rail .out{margin:0 0 0 auto;padding:0;border:0}
-  .main{padding:1.1rem}
+  .rail{flex-direction:row;flex-wrap:wrap;align-items:center;
+    gap:.4rem;border-right:0;border-bottom:1px solid var(--line);padding:.7rem .9rem}
+  .rail .brand{display:flex;align-items:center;min-height:44px;padding:0;font-size:1.05rem;margin-right:auto}
+  .rail .signout{margin:0}
+  .rail .signout button{min-height:44px;padding:.5rem .9rem}
+  .rail .out{order:3;width:100%;margin:.1rem 0 0;padding:0;border:0;text-align:left;
+    font-size:.75rem;line-height:1.3}
+
+  /* The bar. display:contents on desktop, six cells here. */
+  .rail-links{display:grid;grid-template-columns:repeat(6,1fr);
+    position:fixed;left:0;right:0;bottom:0;z-index:30;
+    background:var(--panel);border-top:1px solid var(--line)}
+  .rail-links a{display:flex;align-items:center;justify-content:center;text-align:center;
+    min-height:54px;padding:.3rem .12rem;border-radius:0;font-size:.72rem;line-height:1.15;
+    letter-spacing:-.01em;overflow:hidden}
+  .rail-links a:hover{background:var(--panel)}
+  .rail-links a[aria-current="page"]{background:#eaf0fe;color:var(--accent-ink);font-weight:600;
+    box-shadow:inset 0 3px 0 var(--accent)}
+
+  /* The page clears the bar rather than hiding its last card under it. */
+  /* min-width:0 is the whole of "the body never scrolls sideways". A grid
+     item's default min-width is auto, so the one table that is deliberately
+     wider than the screen was widening the column it sits in — and with it
+     the page — instead of scrolling inside its own .scroll box. */
+  .main{padding:1.1rem 1rem calc(54px + 2.5rem);max-width:100%;min-width:0}
+  .top{display:block;margin-bottom:1.1rem}
+  h1{font-size:1.25rem}
+  .card{padding:.9rem;border-radius:var(--r1)}
+  pre{max-width:100%}
+
+  /* A node id, a hash, a redacted DSN: long and unbreakable, and the only
+     things on these pages that can push the body sideways. */
+  td,code,.mono,.lede,.muted,.out{overflow-wrap:anywhere}
+  /* Not th: a header is one short word in a narrow column, and breaking it
+     anywhere turns "verdict" into "verdi ct". */
+  th{white-space:nowrap}
+  /* A link in a cell is a tap target, not a run of text. */
+  td a{display:inline-flex;align-items:center;min-height:44px}
+
+  /* Forms. 16px is not a taste: below it, iOS Safari zooms the whole page on
+     focus and the person is left panned somewhere they did not ask to be. */
+  input,select,textarea{font-size:16px}
+  input:not([type=checkbox]):not([type=radio]),select,textarea{min-height:44px}
+  .row{flex-direction:column;align-items:stretch;gap:.55rem}
+  .row>div{width:100%}
+  .grow{min-width:0}
+  .row input:not([type=checkbox]):not([type=radio]),
+  .row select,.row textarea{width:100%}
+  /* .btn is an <a>, and an inline box ignores both width and min-height —
+     which is how "Clear" beside "Filter" was a 39px target. */
+  button,.btn{display:inline-flex;align-items:center;justify-content:center;
+    width:100%;min-height:44px;padding:.6rem 1rem}
+  .rail .signout button{width:auto}
+  .check{display:flex;align-items:center;gap:.6rem;min-height:44px;margin:0}
+  input[type=checkbox]{width:22px;height:22px;flex:none}
+
+  /* Tables stop being tables. One table in the markup, cards here: the row
+     is a block, the identifying cell is the line of text, and every other
+     cell wears the label its column header carried. */
+  .cards,.cards tbody,.cards td{display:block;width:100%}
+  .cards tr{display:flex;flex-direction:column;width:100%;
+    border:1px solid var(--line);border-radius:var(--r1);padding:.55rem .7rem;margin:0 0 .7rem}
+  .cards tr.hd{display:none}
+  .cards tr:last-child{margin-bottom:0}
+  .cards td{border-bottom:0;padding:.28rem 0}
+  .cards td::before{content:attr(data-label);display:block;font-size:.72rem;font-weight:500;
+    text-transform:uppercase;letter-spacing:.03em;color:var(--dim)}
+  .cards td[data-label=""]::before{display:none}
+  .cards td.n{text-align:left}
+  .cards td.id{order:-1;font-size:1rem;padding-top:.1rem}
+  .cards td.id::before{display:none}
+  .cards td.id a{display:block;min-height:44px;padding:.5rem 0}
+  .cards td form{margin-top:.4rem}
+
+  /* The one table too wide to be cards keeps its sideways scroll, and says
+     so without a word: the shadow at an edge is painted only while there is
+     more content past it (the gradients are local, the shadows are not), and
+     the scrollbar is forced visible. overscroll-behavior stops the swipe
+     that reaches the end from becoming a browser back-gesture. */
+  .scroll{overscroll-behavior-x:contain;scrollbar-width:thin;
+    background:
+      linear-gradient(to right,var(--panel) 30%,rgba(255,255,255,0)) left center,
+      linear-gradient(to left,var(--panel) 30%,rgba(255,255,255,0)) right center,
+      radial-gradient(farthest-side at 0 50%,rgba(28,35,48,.28),rgba(28,35,48,0)) left center,
+      radial-gradient(farthest-side at 100% 50%,rgba(28,35,48,.28),rgba(28,35,48,0)) right center;
+    background-repeat:no-repeat;
+    background-size:1.6rem 100%,1.6rem 100%,1.1rem 100%,1.1rem 100%;
+    background-attachment:local,local,scroll,scroll}
+  .scroll::-webkit-scrollbar{height:7px;-webkit-appearance:none}
+  .scroll::-webkit-scrollbar-thumb{background:var(--dim);border-radius:4px}
+  .wide{min-width:60rem}
+  .wide td,.wide th,.wide code,.wide .mono{overflow-wrap:normal}
+  .wide select,.wide button{width:100%;min-height:44px}
 }
 `
 
@@ -125,10 +242,9 @@ var uiLayout = template.Must(template.New("ui").Parse(`<!doctype html>
 <body><div class="shell">
 <nav class="rail">
   <a class="brand" href="/">Athanor</a>
-  {{$cur := .Nav}}{{range .NavItems}}<a href="{{.Href}}"{{if eq .Href $cur}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}
-  <div class="out">{{if .Actor}}{{.Actor}}<br>{{end}}<span class="mono">{{.Describe}}</span>
-    <form method="post" action="/signout" style="margin-top:.5rem"><button>Sign out</button></form>
-  </div>
+  {{$cur := .Nav}}<div class="rail-links">{{range .NavItems}}<a href="{{.Href}}"{{if eq .Href $cur}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}</div>
+  <div class="out">{{if .Actor}}{{.Actor}}<br>{{end}}<span class="mono">{{.Describe}}</span></div>
+  <form class="signout" method="post" action="/signout"><button>Sign out</button></form>
 </nav>
 <main class="main">
   <div class="top"><div><h1>{{.Title}}</h1>{{if .Lede}}<p class="lede">{{.Lede}}</p>{{end}}</div></div>

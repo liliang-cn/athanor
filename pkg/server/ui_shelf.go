@@ -27,12 +27,12 @@ var shelfTmpl = template.Must(template.New("shelf").Parse(`
 <div class="card">
   <h2 style="margin-top:0">What the shelf stands on</h2>
   {{if .TallyErr}}<p class="empty">The tally could not be read: {{.TallyErr}}</p>{{else}}
-  <div class="scroll"><table>
-    <tr><th>grade</th><th>meaning</th><th class="n">nodes</th><th class="n">edges</th></tr>
+  <div class="scroll"><table class="cards">
+    <tr class="hd"><th>grade</th><th>meaning</th><th class="n">nodes</th><th class="n">edges</th></tr>
     {{range .Tally}}<tr>
-      <td><a class="g-{{.Grade}}" href="/app/shelf?grade={{.Grade}}"><code>{{.Grade}}</code></a></td>
-      <td class="muted">{{.Meaning}}</td>
-      <td class="n">{{.Nodes}}</td><td class="n">{{.Edges}}</td>
+      <td class="id" data-label="grade"><a class="g-{{.Grade}}" href="/app/shelf?grade={{.Grade}}"><code>{{.Grade}}</code></a></td>
+      <td class="muted" data-label="meaning">{{.Meaning}}</td>
+      <td class="n" data-label="nodes">{{.Nodes}}</td><td class="n" data-label="edges">{{.Edges}}</td>
     </tr>{{end}}
   </table></div>
   {{end}}
@@ -42,11 +42,12 @@ var shelfTmpl = template.Must(template.New("shelf").Parse(`
   <h2 style="margin-top:0">Wants a person</h2>
   {{if .AttentionErr}}<p class="empty">Could not be read: {{.AttentionErr}}</p>
   {{else if not .Attention}}<p class="empty">Nothing is held or refused.</p>
-  {{else}}<div class="scroll"><table>
-    <tr><th>grade</th><th>record</th><th>why</th><th>from</th></tr>
+  {{else}}<div class="scroll"><table class="cards">
+    <tr class="hd"><th>grade</th><th>record</th><th>why</th><th>from</th></tr>
     {{range .Attention}}<tr>
-      <td class="g-{{.Grade}}"><code>{{.Grade}}</code></td>
-      <td>{{.Record}}</td><td class="g-held">{{.Why}}</td><td class="muted">{{.Source}}</td>
+      <td class="g-{{.Grade}}" data-label="grade"><code>{{.Grade}}</code></td>
+      <td class="id" data-label="record">{{.Record}}</td><td class="g-held" data-label="why">{{.Why}}</td>
+      <td class="muted" data-label="from">{{.Source}}</td>
     </tr>{{end}}
   </table></div>{{end}}
 </div>
@@ -59,11 +60,12 @@ var shelfTmpl = template.Must(template.New("shelf").Parse(`
   {{else if not .Graded}}<p class="empty">Nothing carries that grade.</p>
   {{else}}
   <p class="muted">The first {{len .Graded}}. <code>GET /brain/v1/tools/graded_records</code> asks the same question from a script.</p>
-  <div class="scroll"><table>
-    <tr><th>record</th><th>source</th><th>producer</th><th>when</th></tr>
+  <div class="scroll"><table class="cards">
+    <tr class="hd"><th>record</th><th>source</th><th>producer</th><th>when</th></tr>
     {{range .Graded}}<tr>
-      <td>{{.Record}}{{if .Why}}<br><span class="muted">{{.Why}}</span>{{end}}</td>
-      <td class="muted">{{.Source}}</td><td class="muted">{{.Producer}}</td><td class="muted">{{.At}}</td>
+      <td class="id" data-label="record">{{.Record}}{{if .Why}}<br><span class="muted">{{.Why}}</span>{{end}}</td>
+      <td class="muted" data-label="source">{{.Source}}</td><td class="muted" data-label="producer">{{.Producer}}</td>
+      <td class="muted" data-label="when">{{.At}}</td>
     </tr>{{end}}
   </table></div>{{end}}
 </div>

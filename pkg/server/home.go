@@ -25,14 +25,47 @@ const cookieName = "athanor_key"
 
 var homeTmpl = template.Must(template.New("home").Parse(`<!doctype html>
 <meta charset="utf-8"><title>Athanor</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 body{font:15px/1.5 system-ui,sans-serif;max-width:56rem;margin:2.5rem auto;padding:0 1.25rem;color:#1c1c1c}
 h1{font-weight:600;letter-spacing:-.01em}h2{font-size:1.05rem;margin-top:2.2rem}
 table{border-collapse:collapse;width:100%}td,th{text-align:left;padding:.35rem .6rem;border-bottom:1px solid #e6e6e6}
-th{font-weight:500;color:#666}code{background:#f3f3f3;padding:.1rem .3rem;border-radius:3px}
+th{font-weight:500;color:#666}code{background:#f3f3f3;padding:.1rem .3rem;border-radius:3px;overflow-wrap:break-word}
 .grade{display:inline-block;min-width:8rem}.n{text-align:right;font-variant-numeric:tabular-nums}
 nav a{margin-right:1.2rem}form.in input{font:inherit;padding:.4rem .6rem;width:22rem}
+form.in input.w14{width:14rem}
 .muted{color:#777}.why{color:#8a3b00}
+@media (max-width:760px){
+  /* Only here: on the wide page the fields are sized by their content and
+     border-box would shrink them. At 390px every control is width:100% and
+     its padding has to come out of the 100%, not be added to it. */
+  *{box-sizing:border-box}
+  body{margin:1.4rem auto;padding:0 1rem}
+  h1{font-size:1.4rem}
+  td,code{overflow-wrap:anywhere}
+  /* 16px or iOS Safari zooms the page the moment the field takes focus, and
+     the field it zooms into first is the one that asks for the key. */
+  form.in input,form.in button{font-size:16px;width:100%;min-height:44px;padding:.6rem .7rem;margin:0 0 .55rem}
+  nav{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;margin:1rem 0}
+  nav a,nav button{display:flex;align-items:center;justify-content:center;margin:0;min-height:44px;
+    border:1px solid #e6e6e6;border-radius:8px;padding:.4rem .6rem;font-size:15px;width:100%;background:#fff}
+  nav form{display:block}
+  /* Same treatment as the /app screens: the row becomes a card, the
+     identifying cell is the line of text, every other cell wears its
+     column's header as a label. */
+  table.cards,table.cards tbody,table.cards td{display:block;width:100%}
+  table.cards tr{display:flex;flex-direction:column;border:1px solid #e6e6e6;border-radius:8px;
+    padding:.5rem .7rem;margin:0 0 .6rem}
+  table.cards tr.hd{display:none}
+  table.cards td{border-bottom:0;padding:.25rem 0}
+  table.cards td::before{content:attr(data-label);display:block;font-size:.72rem;font-weight:500;
+    text-transform:uppercase;letter-spacing:.03em;color:#666}
+  table.cards td.id{order:-1;font-size:1rem}
+  table.cards td.id::before{display:none}
+  table.cards td.id a{display:block;min-height:44px;padding:.5rem 0}
+  table.cards td.n{text-align:left}
+  .grade{min-width:0}
+}
 </style>
 <h1>Athanor</h1>
 <p class="muted">{{.Describe}}</p>
@@ -52,33 +85,33 @@ nav a{margin-right:1.2rem}form.in input{font:inherit;padding:.4rem .6rem;width:2
 </nav>
 
 <h2>What the shelf stands on</h2>
-<table>
-<tr><th>grade</th><th>meaning</th><th class="n">nodes</th><th class="n">edges</th></tr>
-{{range .Tally}}<tr><td class="grade"><code>{{.Grade}}</code></td><td>{{.Meaning}}</td><td class="n">{{.Nodes}}</td><td class="n">{{.Edges}}</td></tr>{{end}}
+<table class="cards">
+<tr class="hd"><th>grade</th><th>meaning</th><th class="n">nodes</th><th class="n">edges</th></tr>
+{{range .Tally}}<tr><td class="grade id" data-label="grade"><code>{{.Grade}}</code></td><td data-label="meaning">{{.Meaning}}</td><td class="n" data-label="nodes">{{.Nodes}}</td><td class="n" data-label="edges">{{.Edges}}</td></tr>{{end}}
 </table>
 
 <h2>Wants a person</h2>
 {{if not .Attention}}<p class="muted">Nothing is held or refused.</p>{{else}}
-<table>
-<tr><th>grade</th><th>record</th><th>why</th><th>from</th></tr>
-{{range .Attention}}<tr><td><code>{{.Grade}}</code></td><td>{{.Record}}</td><td class="why">{{.Why}}</td><td class="muted">{{.Source}}</td></tr>{{end}}
+<table class="cards">
+<tr class="hd"><th>grade</th><th>record</th><th>why</th><th>from</th></tr>
+{{range .Attention}}<tr><td data-label="grade"><code>{{.Grade}}</code></td><td class="id" data-label="record">{{.Record}}</td><td class="why" data-label="why">{{.Why}}</td><td class="muted" data-label="from">{{.Source}}</td></tr>{{end}}
 </table>{{end}}
 
 <h2>Decisions</h2>
 <p class="muted">Every act this server performed, and every one an agent recorded through it.
 <code>GET /athanor/decisions?kind=&amp;subject=&amp;actor=</code> asks the same question from a script.</p>
 {{if not .Decisions}}<p class="muted">Nothing has been decided yet.</p>{{else}}
-<table>
-<tr><th>when</th><th>kind</th><th>who</th><th>what</th></tr>
-{{range .Decisions}}<tr><td class="muted">{{.At}}</td><td><code>{{.Kind}}</code></td><td>{{.Actor}}</td>
-<td><a href="/athanor/decisions/{{.Href}}">{{.Line}}</a></td></tr>{{end}}
+<table class="cards">
+<tr class="hd"><th>when</th><th>kind</th><th>who</th><th>what</th></tr>
+{{range .Decisions}}<tr><td class="muted" data-label="when">{{.At}}</td><td data-label="kind"><code>{{.Kind}}</code></td><td data-label="who">{{.Actor}}</td>
+<td class="id" data-label="what"><a href="/athanor/decisions/{{.Href}}">{{.Line}}</a></td></tr>{{end}}
 </table>{{end}}
 
 <h2>Load a finished job into the brain</h2>
 <p class="muted">Jobs come from <a href="/v1/jobs">/v1/jobs</a>; a held job is refused here until it is reviewed.
 <code>POST /athanor/loads {"job": "…"}</code> with your bearer key does the same from a script.</p>
 <form method="post" action="/athanor/loads/form" class="in">
-  <input name="job" placeholder="job id"> <input name="load" placeholder="load name (optional)" style="width:14rem">
+  <input name="job" placeholder="job id"> <input name="load" placeholder="load name (optional)" class="w14">
   <button>Load</button>
 </form>
 <h2>Import from a database somebody else runs</h2>

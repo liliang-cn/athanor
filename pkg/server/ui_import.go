@@ -400,14 +400,14 @@ var livedbWizardTmpl = template.Must(template.New("livedb").Parse(`
     <div class="row">
       <div><label for="driver">driver</label>
         <select id="driver" name="driver">{{$d := .Driver}}{{range .Drivers}}<option value="{{.}}"{{if eq . $d}} selected{{end}}>{{.}}</option>{{end}}</select></div>
-      <div style="flex:1;min-width:22rem"><label for="dsn">connection string</label>
+      <div class="grow" style="--grow-min:22rem"><label for="dsn">connection string</label>
         <input id="dsn" name="dsn" type="password" autocomplete="off" spellcheck="false" style="width:100%"
                placeholder="postgres://user:password@host:5432/db"></div>
     </div>
     <div class="row">
       <div><label for="schema">schema <span class="muted">(optional)</span></label>
         <input id="schema" name="schema" value="{{.Schema}}" placeholder="public"></div>
-      <div style="flex:1;min-width:18rem"><label for="tables">tables <span class="muted">(optional, comma separated)</span></label>
+      <div class="grow" style="--grow-min:18rem"><label for="tables">tables <span class="muted">(optional, comma separated)</span></label>
         <input id="tables" name="tables" value="{{.Tables}}" placeholder="every base table" style="width:100%"></div>
     </div>
     <div class="row">
@@ -417,7 +417,7 @@ var livedbWizardTmpl = template.Must(template.New("livedb").Parse(`
           {{range .Actions}}<option value="{{.}}"{{if eq (printf "%s" .) $a}} selected{{end}}>{{.}}</option>{{end}}
         </select></div>
       <div><label for="scan_text">free text</label>
-        <label style="color:inherit"><input type="checkbox" id="scan_text" name="scan_text" value="1"{{if .ScanText}} checked{{end}}>
+        <label class="check" style="color:inherit"><input type="checkbox" id="scan_text" name="scan_text" value="1"{{if .ScanText}} checked{{end}}>
           scan inside text columns for things that read like a phone number or an address</label></div>
     </div>
     <p class="row" style="margin-top:1rem"><button class="primary" type="submit">Propose a plan</button></p>
@@ -436,9 +436,9 @@ var livedbWizardTmpl = template.Must(template.New("livedb").Parse(`
   <h2 style="margin-top:0">2 · The plan</h2>
   <p><code>{{.ID}}</code> <span class="pill">{{.State}}</span>
     <span class="muted">{{.Driver}} · {{.Redacted}}{{if .Schema}} · schema {{.Schema}}{{end}}</span></p>
-  <div class="scroll"><table>
-    <tr>{{range .Counts}}<th>{{.Label}}</th>{{end}}</tr>
-    <tr>{{range .Counts}}<td class="n">{{.N}}</td>{{end}}</tr>
+  <div class="scroll"><table class="cards">
+    <tr class="hd">{{range .Counts}}<th>{{.Label}}</th>{{end}}</tr>
+    <tr>{{range .Counts}}<td class="n" data-label="{{.Label}}">{{.N}}</td>{{end}}</tr>
   </table></div>
   <p class="muted">{{range .Counts}}{{if and .Note (gt .N 0)}}<strong>{{.Label}}</strong>: {{.Note}} {{end}}{{end}}</p>
   {{if gt .Reversible 0}}
@@ -450,7 +450,7 @@ var livedbWizardTmpl = template.Must(template.New("livedb").Parse(`
   <p class="muted">Covers {{len .Tables}} table{{if ne (len .Tables) 1}}s{{end}}: {{range $i, $t := .Tables}}{{if $i}}, {{end}}<code>{{$t}}</code>{{end}}.
     {{if .CreatedBy}}Proposed by {{.CreatedBy}}{{if .CreatedAt}} at {{.CreatedAt}}{{end}}.{{end}}
     {{if .SignedBy}}Signed by {{.SignedBy}}{{if .SignedAt}} at {{.SignedAt}}{{end}}.{{end}}</p>
-  <div class="scroll"><table>
+  <div class="scroll"><table class="wide">
     <tr><th>column</th><th>in the database</th><th>detected</th><th>treatment</th><th>what enters the graph</th>{{if $.Plan.Draft}}<th>amend</th>{{end}}</tr>
     {{range .Columns}}<tr>
       <td><code>{{.Table}}.{{.Column}}</code>{{if .Type}}<br><span class="muted">{{.Type}}</span>{{end}}</td>
@@ -487,7 +487,7 @@ var livedbWizardTmpl = template.Must(template.New("livedb").Parse(`
     <input type="hidden" name="hash" value="{{.Hash}}">
     <div class="row">
       <div><label for="by">signed by</label><input id="by" name="by" placeholder="your name"></div>
-      <div style="flex:1;min-width:18rem"><label for="note">note <span class="muted">(optional)</span></label>
+      <div class="grow" style="--grow-min:18rem"><label for="note">note <span class="muted">(optional)</span></label>
         <input id="note" name="note" style="width:100%" placeholder="why this is the right plan"></div>
     </div>
     <p class="row" style="margin-top:1rem"><button class="primary" type="submit">Sign this plan</button></p>
@@ -504,14 +504,14 @@ var livedbWizardTmpl = template.Must(template.New("livedb").Parse(`
     <input type="hidden" name="act" value="run">
     <input type="hidden" name="plan" value="{{.ID}}">
     <div class="row">
-      <div style="flex:1;min-width:22rem"><label for="rundsn">connection string</label>
+      <div class="grow" style="--grow-min:22rem"><label for="rundsn">connection string</label>
         <input id="rundsn" name="dsn" type="password" autocomplete="off" spellcheck="false" style="width:100%"></div>
       <div><label for="namespace">namespace <span class="muted">(optional)</span></label>
         <input id="namespace" name="namespace" placeholder="the plan id"></div>
     </div>
     <p class="row" style="margin-top:1rem">
       <button class="primary" type="submit">Run this plan</button>
-      <label style="color:inherit;margin:0"><input type="checkbox" name="dry_run" value="1"> dry run — read and desensitize, write nothing</label>
+      <label class="check" style="color:inherit;margin:0"><input type="checkbox" name="dry_run" value="1"> dry run — read and desensitize, write nothing</label>
     </p>
   </form>
   <p class="muted" style="margin-bottom:0">Keeping the brain in step afterwards is a job rather than a request:
@@ -526,9 +526,10 @@ var livedbWizardTmpl = template.Must(template.New("livedb").Parse(`
   <h2 style="margin-top:0">The run</h2>
   <p><code>{{.ID}}</code>{{if .DryRun}} <span class="pill">dry run — nothing was written</span>{{end}}
     <span class="muted">{{.StartedAt}} → {{.EndedAt}}</span></p>
-  <div class="scroll"><table>
-    <tr><th>rows read</th><th>chunks</th><th>triples</th><th>skipped</th></tr>
-    <tr><td class="n">{{.Rows}}</td><td class="n">{{.Chunks}}</td><td class="n">{{.Triples}}</td><td class="n">{{.Skipped}}</td></tr>
+  <div class="scroll"><table class="cards">
+    <tr class="hd"><th>rows read</th><th>chunks</th><th>triples</th><th>skipped</th></tr>
+    <tr><td class="n" data-label="rows read">{{.Rows}}</td><td class="n" data-label="chunks">{{.Chunks}}</td>
+      <td class="n" data-label="triples">{{.Triples}}</td><td class="n" data-label="skipped">{{.Skipped}}</td></tr>
   </table></div>
   {{if .Drift}}<p class="notice bad" style="margin-top:1rem">Drift: the database has {{len .Drift}} column{{if ne (len .Drift) 1}}s{{end}}
     the signed plan does not — {{range $i, $c := .Drift}}{{if $i}}, {{end}}<code>{{$c}}</code>{{end}}.
@@ -847,7 +848,7 @@ var livedbRunsTmpl = template.Must(template.New("livedbruns").Parse(`
   <p class="muted">Runs are read per plan, because a run is only explicable under the plan it ran with.
     <code>GET /athanor/livedb/runs?plan=…</code> asks the same question from a script.</p>
   <form method="get" action="/app/import/runs" class="row">
-    <div style="flex:1;min-width:18rem"><label for="plan">plan</label>
+    <div class="grow" style="--grow-min:18rem"><label for="plan">plan</label>
       <input id="plan" name="plan" value="{{.Plan}}" placeholder="plan id" style="width:100%"></div>
     <button type="submit">Show its runs</button>
   </form>
@@ -858,13 +859,14 @@ var livedbRunsTmpl = template.Must(template.New("livedbruns").Parse(`
   <h2 style="margin-top:0">Runs of <code>{{.Plan}}</code></h2>
   {{if .RunsErr}}<p class="empty">They could not be read: {{.RunsErr}}</p>
   {{else if not .Runs}}<p class="empty">This plan has not run.</p>
-  {{else}}<div class="scroll"><table>
-    <tr><th>run</th><th>when</th><th class="n">rows</th><th class="n">chunks</th><th class="n">triples</th><th>drift</th></tr>
+  {{else}}<div class="scroll"><table class="cards">
+    <tr class="hd"><th>run</th><th>when</th><th class="n">rows</th><th class="n">chunks</th><th class="n">triples</th><th>drift</th></tr>
     {{range .Runs}}<tr>
-      <td><code>{{.ID}}</code>{{if .DryRun}}<br><span class="pill">dry run</span>{{end}}</td>
-      <td class="muted">{{.StartedAt}}{{if .EndedAt}}<br>→ {{.EndedAt}}{{end}}</td>
-      <td class="n">{{.Rows}}</td><td class="n">{{.Chunks}}</td><td class="n">{{.Triples}}</td>
-      <td>{{if .Drift}}<span class="g-held">{{range $i, $c := .Drift}}{{if $i}}, {{end}}<code>{{$c}}</code>{{end}}</span>
+      <td class="id" data-label="run"><code>{{.ID}}</code>{{if .DryRun}}<br><span class="pill">dry run</span>{{end}}</td>
+      <td class="muted" data-label="when">{{.StartedAt}}{{if .EndedAt}}<br>→ {{.EndedAt}}{{end}}</td>
+      <td class="n" data-label="rows">{{.Rows}}</td><td class="n" data-label="chunks">{{.Chunks}}</td>
+      <td class="n" data-label="triples">{{.Triples}}</td>
+      <td data-label="drift">{{if .Drift}}<span class="g-held">{{range $i, $c := .Drift}}{{if $i}}, {{end}}<code>{{$c}}</code>{{end}}</span>
           <br><span class="muted">dropped; a re-signing is owed</span>{{else}}<span class="muted">none</span>{{end}}
         {{if .Gone}}<br><span class="muted">gone: {{range $i, $c := .Gone}}{{if $i}}, {{end}}<code>{{$c}}</code>{{end}}</span>{{end}}</td>
     </tr>{{end}}
@@ -875,14 +877,14 @@ var livedbRunsTmpl = template.Must(template.New("livedbruns").Parse(`
   <h2 style="margin-top:0">Plans</h2>
   {{if .PlansErr}}<p class="empty">They could not be read: {{.PlansErr}}</p>
   {{else if not .Plans}}<p class="empty">No plan has been proposed. <a href="/app/import/livedb">Propose one.</a></p>
-  {{else}}<div class="scroll"><table>
-    <tr><th>plan</th><th>state</th><th>database</th><th>proposed</th><th>signed by</th></tr>
+  {{else}}<div class="scroll"><table class="cards">
+    <tr class="hd"><th>plan</th><th>state</th><th>database</th><th>proposed</th><th>signed by</th></tr>
     {{range .Plans}}<tr>
-      <td><a href="/app/import/runs?plan={{.ID}}"><code>{{.ID}}</code></a></td>
-      <td><span class="pill">{{.State}}</span></td>
-      <td class="muted">{{.Redacted}}</td>
-      <td class="muted">{{.CreatedAt}}</td>
-      <td class="muted">{{if .SignedBy}}{{.SignedBy}}{{else}}nobody{{end}}</td>
+      <td class="id" data-label="plan"><a href="/app/import/runs?plan={{.ID}}"><code>{{.ID}}</code></a></td>
+      <td data-label="state"><span class="pill">{{.State}}</span></td>
+      <td class="muted" data-label="database">{{.Redacted}}</td>
+      <td class="muted" data-label="proposed">{{.CreatedAt}}</td>
+      <td class="muted" data-label="signed by">{{if .SignedBy}}{{.SignedBy}}{{else}}nobody{{end}}</td>
     </tr>{{end}}
   </table></div>{{end}}
 </div>
@@ -960,17 +962,17 @@ var livedbFollowsTmpl = template.Must(template.New("livedbfollows").Parse(`
   <h2 style="margin-top:0">What is running</h2>
   {{if .FollowsErr}}<p class="empty">They could not be read: {{.FollowsErr}}</p>
   {{else if not .Follows}}<p class="empty">Nothing is being followed.</p>
-  {{else}}<div class="scroll"><table>
-    <tr><th>follow</th><th>plan</th><th>database</th><th>state</th><th>started</th><th></th></tr>
+  {{else}}<div class="scroll"><table class="cards">
+    <tr class="hd"><th>follow</th><th>plan</th><th>database</th><th>state</th><th>started</th><th></th></tr>
     {{range .Follows}}<tr>
-      <td><code>{{.ID}}</code>{{if .Namespace}}<br><span class="muted">into {{.Namespace}}</span>{{end}}</td>
-      <td><a href="/app/import/runs?plan={{.Plan}}"><code>{{.Plan}}</code></a></td>
-      <td class="muted">{{.Redacted}}</td>
-      <td>{{if .Running}}<span class="g-verified">running</span>{{else}}<span class="g-held">stopped</span>
+      <td class="id" data-label="follow"><code>{{.ID}}</code>{{if .Namespace}}<br><span class="muted">into {{.Namespace}}</span>{{end}}</td>
+      <td data-label="plan"><a href="/app/import/runs?plan={{.Plan}}"><code>{{.Plan}}</code></a></td>
+      <td class="muted" data-label="database">{{.Redacted}}</td>
+      <td data-label="state">{{if .Running}}<span class="g-verified">running</span>{{else}}<span class="g-held">stopped</span>
         {{if .StoppedAt}}<br><span class="muted">{{.StoppedAt}}</span>{{end}}
         {{if .Failure}}<br><span class="g-refused">{{.Failure}}</span>{{end}}{{end}}</td>
-      <td class="muted">{{.StartedAt}}</td>
-      <td><form method="post" action="/app/import/follows">
+      <td class="muted" data-label="started">{{.StartedAt}}</td>
+      <td data-label=""><form method="post" action="/app/import/follows">
         <input type="hidden" name="act" value="stop">
         <input type="hidden" name="id" value="{{.ID}}">
         <button type="submit">{{if .Running}}Stop{{else}}Clear{{end}}</button>
@@ -993,7 +995,7 @@ var livedbFollowsTmpl = template.Must(template.New("livedbfollows").Parse(`
     <input type="hidden" name="act" value="start">
     <div class="row">
       <div><label for="plan">signed plan</label><input id="plan" name="plan" placeholder="plan id"></div>
-      <div style="flex:1;min-width:20rem"><label for="dsn">connection string</label>
+      <div class="grow" style="--grow-min:20rem"><label for="dsn">connection string</label>
         <input id="dsn" name="dsn" type="password" autocomplete="off" spellcheck="false" style="width:100%"></div>
       <div><label for="namespace">namespace <span class="muted">(optional)</span></label>
         <input id="namespace" name="namespace" placeholder="the plan id"></div>
