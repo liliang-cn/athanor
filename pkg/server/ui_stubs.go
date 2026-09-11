@@ -8,14 +8,6 @@ import "net/http"
 // so that the routes can be registered once, in server.go, and neither author
 // has to touch that file.
 
-func (s *Server) handleUIDecisions(w http.ResponseWriter, r *http.Request) {
-	s.uiNotYet(w, r, "Decisions", "/app/decisions")
-}
-
-func (s *Server) handleUIDecisionChain(w http.ResponseWriter, r *http.Request) {
-	s.uiNotYet(w, r, "Decision", "/app/decisions")
-}
-
 func (s *Server) handleUIImport(w http.ResponseWriter, r *http.Request) {
 	s.uiNotYet(w, r, "Import", "/app/import")
 }
