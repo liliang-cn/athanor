@@ -204,6 +204,15 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux.Handle("/metrics", s.requireKey(metrics.Handler()))
 	mux.Handle("/debug/vars", s.requireKey(expvar.Handler()))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
+	// Athanor's own screens. Registered here, all of them, so that the file
+	// each screen lives in is the only file its author touches.
+	mux.HandleFunc("/app/shelf", s.handleUIShelf)
+	mux.HandleFunc("/app/decisions", s.handleUIDecisions)
+	mux.HandleFunc("/app/decisions/{id...}", s.handleUIDecisionChain)
+	mux.HandleFunc("/app/import", s.handleUIImport)
+	mux.HandleFunc("/app/import/livedb", s.handleUIImportLiveDB)
+	mux.HandleFunc("/app/import/runs", s.handleUIImportRuns)
+	mux.HandleFunc("/app/import/follows", s.handleUIImportFollows)
 	mux.HandleFunc("/signin", s.handleSignin)
 	mux.HandleFunc("/signout", s.handleSignout)
 	mux.HandleFunc("/", s.handleHome)
