@@ -38,7 +38,12 @@ function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="alert-title"
       className={cn(
-        "col-start-2 line-clamp-1 min-h-4 font-medium tracking-tight",
+        // Upstream clamps this to one line, which suits a two-word label and
+        // not this product: every alert title here is a sentence, and the ones
+        // that matter most — schema drift, a refusal, a walk that stopped
+        // short — are the longest. On a phone the clamp took the second half
+        // of exactly those, so a warning read as a shrug. Wrap instead.
+        "col-start-2 min-h-4 font-medium tracking-tight text-balance",
         className
       )}
       {...props}
