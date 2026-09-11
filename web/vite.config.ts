@@ -1,7 +1,6 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
-import path from "node:path";
 
 // The bundle is emitted straight into the Go package that embeds it, so
 // `make ui` is the only step between a source change and a binary that
@@ -9,7 +8,7 @@ import path from "node:path";
 // copy is a thing that can be stale.
 export default defineConfig({
   plugins: [react(), tailwindcss()],
-  resolve: { alias: { "@": path.resolve(__dirname, "src") } },
+  resolve: { alias: { "@": new URL("./src", import.meta.url).pathname } },
   build: { outDir: "../pkg/server/web_dist", emptyOutDir: true },
   server: {
     port: 43520,

@@ -1,6 +1,4 @@
-.git
-**/*.db
-**/*.db-shm
-**/*.db-wal
-/athanor
-/dist
+web/node_modules/
+*.db
+*.db-shm
+*.db-wal
