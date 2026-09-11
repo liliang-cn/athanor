@@ -1,7 +1,7 @@
+# Frontend dependencies. The lockfile is committed; what it installs is not.
+web/node_modules/
+
+# Local build scratch.
 *.db
 *.db-shm
 *.db-wal
-.env
-**/.env
-/athanor
-/dist/

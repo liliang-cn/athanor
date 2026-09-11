@@ -21,7 +21,7 @@ func (s *Server) requireKey(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if _, code, _ := s.httpKey(r.Header.Get("Authorization")); code == 0 {
+		if _, code, _ := s.requestKey(r); code == 0 {
 			next.ServeHTTP(w, r)
 			return
 		}

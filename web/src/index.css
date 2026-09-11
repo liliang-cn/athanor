@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+/*
+ * Dark mode is a class, not a media query, because a person working in a
+ * server room at two in the morning gets to choose. The class lands on <html>
+ * before first paint (index.html), so there is no frame of the wrong theme.
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Athanor is an instrument, not a dashboard: somebody reads a plan on it and
+ * then signs their name to what leaves a database. So the surface is quiet —
+ * cool paper rather than white, one blue accent and no second one — and the
+ * only saturated colour in the whole product is a grade. When something on
+ * this screen is coloured, that colour means something.
+ */
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(0.985 0.003 250);
+  --foreground: oklch(0.21 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: var(--foreground);
+  --popover: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.52 0.19 262);
+  --primary-foreground: oklch(0.985 0.003 250);
+  --secondary: oklch(0.96 0.005 255);
+  --secondary-foreground: oklch(0.28 0.02 260);
+  --muted: oklch(0.965 0.004 255);
+  --muted-foreground: oklch(0.53 0.02 258);
+  --accent: oklch(0.955 0.012 258);
+  --accent-foreground: oklch(0.28 0.03 262);
+  --destructive: oklch(0.55 0.19 27);
+  --destructive-foreground: oklch(0.985 0.003 250);
+  --border: oklch(0.915 0.006 255);
+  --input: oklch(0.915 0.006 255);
+  --ring: oklch(0.52 0.19 262);
+
+  /*
+   * The knowledge contract's ladder. These are the product's vocabulary, not
+   * a chart palette: verified is something a named person kept, refused is
+   * something the vocabulary declined, and a reader learns the colours once
+   * and then reads every screen faster. They live here so the graph, the
+   * shelf and the plan cannot drift into three different greens.
+   */
+  --grade-verified: oklch(0.52 0.13 163);
+  --grade-self: oklch(0.55 0.11 220);
+  --grade-asserted: oklch(0.58 0.02 258);
+  --grade-held: oklch(0.63 0.15 70);
+  --grade-refused: oklch(0.55 0.19 27);
+  --grade-untagged: oklch(0.72 0.012 258);
+}
+
+.dark {
+  --background: oklch(0.17 0.015 262);
+  --foreground: oklch(0.93 0.008 255);
+  --card: oklch(0.21 0.018 262);
+  --card-foreground: var(--foreground);
+  --popover: oklch(0.21 0.018 262);
+  --popover-foreground: var(--foreground);
+  --primary: oklch(0.68 0.16 258);
+  --primary-foreground: oklch(0.17 0.015 262);
+  --secondary: oklch(0.26 0.018 262);
+  --secondary-foreground: oklch(0.93 0.008 255);
+  --muted: oklch(0.26 0.018 262);
+  --muted-foreground: oklch(0.68 0.015 258);
+  --accent: oklch(0.28 0.025 262);
+  --accent-foreground: oklch(0.93 0.008 255);
+  --destructive: oklch(0.66 0.18 25);
+  --destructive-foreground: oklch(0.17 0.015 262);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.68 0.16 258);
+
+  /* Lifted for a dark ground: the light values sit near 3:1 here, and a grade
+     a reader cannot distinguish is a grade that is not doing its job. */
+  --grade-verified: oklch(0.74 0.15 163);
+  --grade-self: oklch(0.75 0.12 220);
+  --grade-asserted: oklch(0.72 0.02 258);
+  --grade-held: oklch(0.79 0.15 75);
+  --grade-refused: oklch(0.70 0.17 25);
+  --grade-untagged: oklch(0.5 0.012 258);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-verified: var(--grade-verified);
+  --color-self-consistent: var(--grade-self);
+  --color-asserted: var(--grade-asserted);
+  --color-held: var(--grade-held);
+  --color-refused: var(--grade-refused);
+  --color-untagged: var(--grade-untagged);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: ui-sans-serif, -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  /* Ids, hashes and redacted connection strings are the long unbreakable
+     things on every screen here, and they are what push a phone page sideways
+     if nothing tells them not to. */
+  code, .font-mono {
+    @apply break-words;
+  }
+  /* iOS Safari zooms the page when a focused field is under 16px. One line,
+     and the single most common mobile-web defect. */
+  @media (max-width: 767px) {
+    input, select, textarea {
+      font-size: 16px;
+    }
+  }
+}

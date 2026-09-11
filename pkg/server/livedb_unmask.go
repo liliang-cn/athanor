@@ -60,7 +60,7 @@ func (s *Server) handleLivedbUnmask(w http.ResponseWriter, r *http.Request) {
 		httpError(w, http.StatusMethodNotAllowed, "POST a {tokens, why} document")
 		return
 	}
-	key, code, msg := s.httpKey(r.Header.Get("Authorization"))
+	key, code, msg := s.requestKey(r)
 	if code != 0 {
 		httpError(w, code, msg)
 		return

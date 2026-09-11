@@ -378,7 +378,9 @@ func TestTheFrontPageShowsTheLedger(t *testing.T) {
 		t.Fatalf("agent decision: %v", err)
 	}
 
-	req, _ := http.NewRequest(http.MethodGet, "http://"+h.httpAddr+"/", nil)
+	// The ledger the interface reads is the JSON route, authenticated by the
+	// same cookie a browser carries. Athanor renders no HTML of its own.
+	req, _ := http.NewRequest(http.MethodGet, "http://"+h.httpAddr+"/athanor/decisions?limit=20", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: "op-secret"})
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -386,12 +388,12 @@ func TestTheFrontPageShowsTheLedger(t *testing.T) {
 	}
 	page, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if !strings.Contains(string(page), "Decisions") {
-		t.Fatalf("the front page has no Decisions section")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the ledger answered %d: %s", resp.StatusCode, page)
 	}
-	for _, want := range []string{"march", "held the release", "/athanor/decisions/"} {
+	for _, want := range []string{"march", "held the release"} {
 		if !strings.Contains(string(page), want) {
-			t.Errorf("the front page does not show %q", want)
+			t.Errorf("the ledger does not report %q", want)
 		}
 	}
 }

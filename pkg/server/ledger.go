@@ -549,7 +549,7 @@ func (s *Server) handleDecisionChain(w http.ResponseWriter, r *http.Request) {
 // authorizeLedger is the ledger routes' door: any key from the policy, read
 // clearance, exactly as the graph and the metrics take.
 func (s *Server) authorizeLedger(w http.ResponseWriter, r *http.Request) (authz.Key, bool) {
-	key, code, msg := s.httpKey(r.Header.Get("Authorization"))
+	key, code, msg := s.requestKey(r)
 	if code != 0 {
 		httpError(w, code, msg)
 		return authz.Key{}, false

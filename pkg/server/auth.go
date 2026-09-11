@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -167,6 +168,18 @@ func (w *swappedStream) Context() context.Context { return w.ctx }
 // httpKey authenticates a plain HTTP request against the same policy, for the
 // routes Athanor serves itself. It returns the key, or the status and message
 // to answer with.
+// requestKey resolves who is calling, from the bearer header a program sends
+// or the session cookie a browser carries.
+//
+// One function, because the two credentials must never be resolved by
+// different rules: the interface is a frontend project and reaches every one
+// of these routes with a cookie, so a route that read only the header would be
+// unreachable from the product's own screens. The header wins when both are
+// present, so curl behaves the same whatever a browser left in the jar.
+func (s *Server) requestKey(r *http.Request) (authz.Key, int, string) {
+	return s.httpKey(cookieAuthorization(r))
+}
+
 func (s *Server) httpKey(authorization string) (authz.Key, int, string) {
 	if !s.keys.Enabled() {
 		return authz.Key{ID: "open", Clearance: authz.ReadWrite}, 0, ""

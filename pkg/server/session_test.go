@@ -1,10 +1,11 @@
 package server
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
-	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -33,9 +34,17 @@ func stopAtRedirect(c *http.Client) *http.Client {
 	return &d
 }
 
+// signIn opens a session the way the frontend does: a JSON POST, answered
+// with the cookie and the key's identity.
 func (h *harness) signIn(t *testing.T, c *http.Client, key string) *http.Response {
 	t.Helper()
-	resp, err := stopAtRedirect(c).PostForm("http://"+h.httpAddr+"/signin", url.Values{"key": {key}})
+	body := strings.NewReader(`{"key":` + strconv.Quote(key) + `}`)
+	req, err := http.NewRequest(http.MethodPost, "http://"+h.httpAddr+"/api/session", body)
+	if err != nil {
+		t.Fatalf("sign in request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := stopAtRedirect(c).Do(req)
 	if err != nil {
 		t.Fatalf("sign in: %v", err)
 	}
@@ -45,7 +54,11 @@ func (h *harness) signIn(t *testing.T, c *http.Client, key string) *http.Respons
 
 func (h *harness) signOut(t *testing.T, c *http.Client) *http.Response {
 	t.Helper()
-	resp, err := stopAtRedirect(c).PostForm("http://"+h.httpAddr+"/signout", nil)
+	req, err := http.NewRequest(http.MethodDelete, "http://"+h.httpAddr+"/api/session", nil)
+	if err != nil {
+		t.Fatalf("sign out request: %v", err)
+	}
+	resp, err := stopAtRedirect(c).Do(req)
 	if err != nil {
 		t.Fatalf("sign out: %v", err)
 	}
@@ -86,8 +99,21 @@ func TestOneSignInOpensTheFrontPageAndTheReviewUI(t *testing.T) {
 	b := h.browser(t)
 
 	resp := h.signIn(t, b, "op-secret")
-	if resp.StatusCode != http.StatusSeeOther {
-		t.Fatalf("sign in answered %d, want 303", resp.StatusCode)
+	// A JSON endpoint, because the interface is a frontend project: it answers
+	// 200 with who you now are rather than redirecting a form submission.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sign in answered %d, want 200", resp.StatusCode)
+	}
+	var who struct {
+		SignedIn bool   `json:"signed_in"`
+		Actor    string `json:"actor"`
+		CanWrite bool   `json:"can_write"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&who); err != nil {
+		t.Fatalf("sign in body: %v", err)
+	}
+	if !who.SignedIn || who.Actor != "operator" || !who.CanWrite {
+		t.Fatalf("sign in reported %+v", who)
 	}
 	set := cookieNamed(resp.Cookies(), cookieName)
 	if set == nil || set.Value != "op-secret" {

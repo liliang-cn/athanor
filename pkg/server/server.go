@@ -173,7 +173,6 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	// they get the same door as every other route (gate.go).
 	mux.Handle("/graph/", s.requireKey(http.StripPrefix("/graph", view.Handler())))
 	mux.HandleFunc("/athanor/loads", s.handleLoads)
-	mux.HandleFunc("/athanor/loads/form", s.handleLoadForm)
 	// The vocabulary as a workflow rather than a string pasted into every job:
 	// draft, propose from a run, approve, publish (ontologies.go). "current" is
 	// a literal segment and an id always carries an "@", so it cannot be one.
@@ -206,16 +205,13 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
 	// Athanor's own screens. Registered here, all of them, so that the file
 	// each screen lives in is the only file its author touches.
-	mux.HandleFunc("/app/shelf", s.handleUIShelf)
-	mux.HandleFunc("/app/decisions", s.handleUIDecisions)
-	mux.HandleFunc("/app/decisions/{id...}", s.handleUIDecisionChain)
-	mux.HandleFunc("/app/import", s.handleUIImport)
-	mux.HandleFunc("/app/import/livedb", s.handleUIImportLiveDB)
-	mux.HandleFunc("/app/import/runs", s.handleUIImportRuns)
-	mux.HandleFunc("/app/import/follows", s.handleUIImportFollows)
-	mux.HandleFunc("/signin", s.handleSignin)
-	mux.HandleFunc("/signout", s.handleSignout)
-	mux.HandleFunc("/", s.handleHome)
+	// The interface is a frontend project (web/), not something this package
+	// draws. Two things are served for it: the session, and the built bundle.
+	mux.HandleFunc("/api/session", s.handleSession)
+	mux.HandleFunc("/api/shelf", s.handleShelf)
+	// Last, so every route above shadows it: anything the bundle does not
+	// have falls through to index.html, because the router is in the browser.
+	mux.Handle("/", webAssets(webDist()))
 	s.mux = mux
 	return s, nil
 }

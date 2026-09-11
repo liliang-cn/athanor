@@ -70,7 +70,7 @@ const ontologyOperation = "athanor.ontologies"
 // authorizeOntology answers the request itself when the key is missing or the
 // clearance is short, and reports whether the handler may continue.
 func (s *Server) authorizeOntology(w http.ResponseWriter, r *http.Request, access authz.Access) (authz.Key, bool) {
-	key, code, msg := s.httpKey(r.Header.Get("Authorization"))
+	key, code, msg := s.requestKey(r)
 	if code != 0 {
 		httpError(w, code, msg)
 		return authz.Key{}, false
@@ -360,7 +360,7 @@ func decodeBody(w http.ResponseWriter, r *http.Request, into any) bool {
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
-	body, err := jsonMarshal(v)
+	body, err := json.Marshal(v)
 	if err != nil {
 		httpError(w, http.StatusInternalServerError, err.Error())
 		return

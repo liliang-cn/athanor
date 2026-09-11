@@ -128,7 +128,7 @@ const livedbOperation = "athanor.livedb"
 // once called alchemy's Review a read — so each cell of the matrix has a test
 // rather than a reading of this comment.
 func (s *Server) authorizeLivedb(w http.ResponseWriter, r *http.Request, access authz.Access) (authz.Key, bool) {
-	key, code, msg := s.httpKey(r.Header.Get("Authorization"))
+	key, code, msg := s.requestKey(r)
 	if code != 0 {
 		httpError(w, code, msg)
 		return authz.Key{}, false
