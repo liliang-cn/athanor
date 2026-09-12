@@ -34,9 +34,9 @@ change. Every door reads one key file — see `deploy/keys.example.json`.
 ```sh
 K='Authorization: Bearer <operator key>'
 # 1. a file, under a vocabulary
-curl -H "$K" -H 'Content-Type: text/markdown' --data-binary @runbook.md \
-  'http://127.0.0.1:47832/v1/sources?name=runbook.md&kind=SOURCE_KIND_DOCUMENT'
-curl -H "$K" -d '{"source_ids":["<id>"],"ontology":"<json>","part":"prose","models":{"llm":{"name":"…","base_url":"…"}}}' \
+curl -H "$K" -H 'Content-Type: application/octet-stream' --data-binary @runbook.md \
+  'http://127.0.0.1:47832/v1/sources?name=runbook.md&kind=SOURCE_KIND_DOCUMENT&media_type=text/markdown'
+curl -H "$K" -d '{"source_ids":["<id>"],"ontology":"<json>","part":"prose","models":{"llm":{"name":"…","endpoint":"…","api_key":"…"}}}' \
   http://127.0.0.1:47832/v1/jobs
 # 2. held — two sources disagree — review it
 open http://127.0.0.1:47832/ui/
