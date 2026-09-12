@@ -1,4 +1,5 @@
-# cp deploy/docker/.env.example deploy/docker/.env   # edit the keys path
+# cp deploy/docker/.env.example deploy/docker/.env   # then read it: the
+# secrets directory has to be readable by the uid the image runs as.
 # docker compose -f deploy/docker/docker-compose.yml up -d --build
 services:
   athanor:
@@ -12,8 +13,18 @@ services:
       ATHANOR_SPOOL: /data/spool
       ATHANOR_GRPC_ADDR: 0.0.0.0:${ATHANOR_GRPC_PORT:-47831}
       ATHANOR_HTTP_ADDR: 0.0.0.0:${ATHANOR_HTTP_PORT:-47832}
-      ATHANOR_KEY_FILE: /run/athanor/keys.json
+      ATHANOR_KEY_FILE: /run/athanor/${ATHANOR_KEYS_NAME:-keys.json}
       ATHANOR_TOKEN: ${ATHANOR_TOKEN:-}
+      ATHANOR_BACKUP_DIR: ${ATHANOR_BACKUP_DIR:-}
+      # The live-database path. Without a vault a plan whose classifier chose
+      # pseudonymize for so much as one column cannot be signed — the refusal
+      # is deliberate (there would be nowhere to put the original) and it
+      # arrives at signing time, which is late to discover that the deployment
+      # cannot do the thing it was deployed for.
+      ATHANOR_VAULT: ${ATHANOR_VAULT:-}
+      ATHANOR_VAULT_KEY: ${ATHANOR_VAULT_KEY:-}
+      ATHANOR_VAULT_TENANT: ${ATHANOR_VAULT_TENANT:-}
+      ATHANOR_LIVEDB_HOSTS: ${ATHANOR_LIVEDB_HOSTS:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       CORTEXDB_EMBED_MODEL: ${CORTEXDB_EMBED_MODEL:-}
@@ -23,7 +34,11 @@ services:
       - "${ATHANOR_BIND_HOST:-127.0.0.1}:${ATHANOR_HTTP_PORT:-47832}:${ATHANOR_HTTP_PORT:-47832}"
     volumes:
       - athanor-data:/data
-      - ${ATHANOR_KEYS:-./keys.json}:/run/athanor/keys.json:ro
+      # A directory and not a file, because there is more than one secret: the
+      # key policy, and the vault key when the live-database path is used. A
+      # second single-file mount would be a second thing to get the ownership
+      # of wrong.
+      - ${ATHANOR_SECRETS:-.}:/run/athanor:ro
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
