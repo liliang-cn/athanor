@@ -194,6 +194,13 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux.HandleFunc("/athanor/livedb/follows", s.handleLivedbFollows)
 	mux.HandleFunc("/athanor/livedb/follows/{id}", s.handleLivedbFollow)
 	mux.HandleFunc("/athanor/livedb/unmask", s.handleLivedbUnmask)
+	// The named moment: take one, retire one, compare two (snapshots.go).
+	// "diff" is a literal segment and Go's mux prefers it to {name}, exactly as
+	// it does for "current" above; a snapshot name carrying a colon is refused
+	// by the store, so `{name}:drop` cannot be ambiguous.
+	mux.HandleFunc("/athanor/snapshots", s.handleSnapshots)
+	mux.HandleFunc("/athanor/snapshots/diff", s.handleSnapshotDiff)
+	mux.HandleFunc("/athanor/snapshots/{name}", s.handleSnapshot)
 	// The ledger: what this server did, and why. Reads only — an entry is
 	// written by performing the act it describes (ledger.go). The id pattern
 	// takes the rest of the path because a decision id carries colons and a

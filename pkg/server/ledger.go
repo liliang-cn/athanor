@@ -90,6 +90,15 @@ const (
 	ledgerKindLoad     = cortexdb.DecisionKindLoad
 	ledgerKindReview   = cortexdb.DecisionKindReview
 	ledgerKindOntology = "ontology." // + the verb
+	ledgerKindSnapshot = "snapshot." // + the verb
+)
+
+// The two acts on a named moment (snapshots.go). Verbs rather than kinds
+// because the kind is the prefix above and a reader filtering the ledger asks
+// for "snapshot.take", which is the two spelled together.
+const (
+	snapshotTake = "take"
+	snapshotDrop = "drop"
 )
 
 func loadDecisionID(job, load string) string   { return "athanor:load:" + job + ":" + load }
@@ -97,6 +106,15 @@ func reviewDecisionID(job, item string) string { return "athanor:review:" + job 
 func ontologyDecisionID(actID string) string   { return "athanor:ontology:" + actID }
 func livedbPlanDecisionID(plan string) string  { return "athanor:livedb:plan:" + plan }
 func livedbRunDecisionID(run string) string    { return "athanor:livedb:run:" + run }
+
+// A snapshot's two acts are two entries, not one entry whose verdict moves —
+// which is the arrangement a livedb plan uses and the wrong one here. A plan's
+// proposal and signature are two halves of one decision about one plan; taking
+// a moment and retiring it are separated by however long the moment was worth
+// keeping, and folding the drop into the take would overwrite the record of
+// what was counted with the record that somebody stopped caring.
+func snapshotDecisionID(name string) string     { return "athanor:snapshot:" + name }
+func snapshotDropDecisionID(name string) string { return "athanor:snapshot:" + name + ":drop" }
 
 // livedbFollowDecisionID names one background follow. Its own entry rather
 // than an update to the plan's, because a plan may be followed, stopped and

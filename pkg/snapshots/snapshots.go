@@ -107,7 +107,10 @@ type Footing struct {
 	// the caller, because a brain that has been fed for a year has thousands
 	// and a snapshot is not a listing.
 	Loads []string `json:"loads,omitempty"`
-	// MoreLoads says the list was cut. LoadCount is how many there were.
+	// MoreLoads says the list was cut short. LoadCount is how many loads this
+	// snapshot names — a floor rather than a total when MoreLoads is set,
+	// because the door stops counting at the cap and a number that claimed to
+	// be the total would be the one thing here nobody could check.
 	MoreLoads bool `json:"more_loads,omitempty"`
 	LoadCount int  `json:"load_count,omitempty"`
 }
