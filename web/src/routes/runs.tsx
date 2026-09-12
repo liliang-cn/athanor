@@ -338,8 +338,8 @@ export function Runs() {
             )}
             {drifting > 0 && (
               <p className="text-held text-sm text-pretty">
-                {drifting} of these {plural(drifting, "run", "runs")} met a column the signature does not
-                cover. A re-signing is owed.
+                {drifting} of these runs met a column the signature does not cover. A re-signing is
+                owed.
               </p>
             )}
             {newestFirst?.map((r) => <Run key={r.id} run={r} />)}
