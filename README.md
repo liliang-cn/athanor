@@ -92,14 +92,64 @@ produced names that id in its provenance, and the row keeps its body — so a
 graph loaded under `sds@1` can still be asked what checked it, long after
 `sds@2` became current.
 
+## The rules, as a workflow
+
+CortexDB has had a general rule engine since the rule became data: a Horn
+clause over graph edges, forward-chained to a fixpoint, every derived edge
+carrying the rule's id, the rule's text and the premise edges under it. It
+holds no workflow, because it holds nothing — `rules_save` is an upsert into a
+configuration table and `rules_apply` fires whatever is enabled, for whoever
+asked, with no record that anybody asked. A rule that adds edges to the brain
+is a claim about what is true, so Athanor holds the other half.
+
+```sh
+# declare a rule; the body is the document CortexDB's own rules_save takes
+curl -H "$K" -H 'Content-Type: application/json' -d '{"id":"chain@1",
+  "text":"IF manages(?a, ?b) AND manages(?b, ?c) THEN manages_chain(?a, ?c)",
+  "note":"a manager'"'"'s manager manages you"}' \
+  http://127.0.0.1:47832/athanor/rules
+# read what it would do before letting it loose
+curl -H "$K" -d '{"by":"liliang","dry_run":true}' \
+  'http://127.0.0.1:47832/athanor/rules/chain@1:apply'
+# in force
+curl -H "$K" -d '{"by":"liliang"}' \
+  'http://127.0.0.1:47832/athanor/rules/chain@1:publish'
+# fired — an act with an author, over a scope
+curl -H "$K" -d '{"by":"liliang","document":"orgchart"}' \
+  'http://127.0.0.1:47832/athanor/rules/chain@1:apply'
+# what the rules have actually derived, newest first
+curl -H "$K" 'http://127.0.0.1:47832/athanor/rules/firings?limit=20'
+```
+
+Firing without a `by` is refused, exactly as approving a vocabulary is. A draft
+fires only as a dry run; a retired rule does not fire at all, and everything it
+derived stays exactly where it is, still naming the version that derived it —
+`fact_provenance` says which rule, `inference_explain` names the premises under
+the conclusion.
+
+What a firing writes reaches the brain graded: `self_consistent`, because it
+was derived deterministically from what was already stated and checked against
+nothing in the world, produced `compiled`, naming the rule as its source, the
+key as its author and the firing as the run that made it. Without that a rule's
+output would be the one thing on the shelf `contract_tally` cannot count, and
+an uncountable record is one nobody distrusts.
+
+The rules are deliberately not written into CortexDB's own rule table. A rule
+sitting enabled there can be fired through the brain's own door by any key with
+write clearance — no `by`, no ledger entry, no firing recorded — which is the
+thing this workflow exists to prevent. An application hands the engine the rule
+as an ad-hoc definition instead: same engine, same derivation, same provenance
+on the edges, and no second path that fires it without an author.
+
 ## The ledger
 
-Four kinds of act reach one store, and one query answers all four.
+Five kinds of act reach one store, and one query answers all five.
 
 ```sh
 curl -H "$K" 'http://127.0.0.1:47832/athanor/decisions?limit=20'
 curl -H "$K" 'http://127.0.0.1:47832/athanor/decisions?kind=load'
 curl -H "$K" 'http://127.0.0.1:47832/athanor/decisions?kind=review&actor=liliang'
+curl -H "$K" 'http://127.0.0.1:47832/athanor/decisions?kind=rule.apply'
 curl -H "$K" 'http://127.0.0.1:47832/athanor/decisions/decision:athanor:load:<job>:<load>'
 ```
 
@@ -108,11 +158,12 @@ the report's counts. A review decision records who accepted, rejected or
 edited which finding, with the note they wrote — recorded from an interceptor
 placed after authorization, so nothing unauthorized is ever recorded. Every
 ontology act is mirrored as `ontology.draft`, `ontology.propose`,
-`ontology.approve`, `ontology.publish`, `ontology.retire`; the two tables in
-`pkg/ontologies` stay the source of truth for the workflow and the ledger is
-the audit view. An agent's own `decision_record` over MCP or gRPC has been
-landing in the same store since CortexDB v2.98.0, and shows up beside them on
-the front page.
+`ontology.approve`, `ontology.publish`, `ontology.retire`, and every rule act
+as `rule.draft`, `rule.publish`, `rule.retire`, `rule.apply`; the tables in
+`pkg/ontologies` and `pkg/rules` stay the source of truth for their workflows
+and the ledger is the audit view. An agent's own `decision_record` over MCP or
+gRPC has been landing in the same store since CortexDB v2.98.0, and shows up
+beside them on the front page.
 
 The actor is always the **key id** — the identity the policy knows and an
 operator can revoke. A free-text `by` (alchemy's `ReviewDecision.by`, an
@@ -143,6 +194,7 @@ confinement with a hole in it reads as a guarantee.
 |---|---|
 | `pkg/server` | the assembly: one policy over two services, and the load |
 | `pkg/ontologies` | vocabulary versions and the signed acts on them |
+| `pkg/rules` | declared rules, who put them in force, and every firing |
 | `deploy/` | systemd, Docker, compose, example key file |
 | `docs/superpowers/specs/` | the design, and why the two decisions were made |
 
@@ -154,10 +206,12 @@ and neither depends on it.
 
 ## Next
 
-A general rule engine; point-in-time snapshots. In that order — see the spec.
-The decision ledger is done: loads, review decisions and ontology acts are all
-entries, and row confinement is closed on the ledger's own routes and open on
-the pipeline, for the reason `pkg/server/auth.go` gives.
+Point-in-time snapshots — see the spec. The rule engine is done: a rule is
+declared under a versioned id, one is in force per lineage, retiring is not
+deleting, and firing one is a signed act whose output reaches the brain graded.
+The decision ledger is done too: loads, review decisions, ontology acts and
+rule acts are all entries, and row confinement is closed on the ledger's own
+routes and open on the pipeline, for the reason `pkg/server/auth.go` gives.
 
 ## License
 
