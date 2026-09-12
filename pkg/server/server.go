@@ -179,6 +179,14 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	mux.HandleFunc("/athanor/ontologies", s.handleOntologies)
 	mux.HandleFunc("/athanor/ontologies/current", s.handleOntologyCurrent)
 	mux.HandleFunc("/athanor/ontologies/{id}", s.handleOntologyVersion)
+	// The rule engine as a workflow rather than a table anybody may fire:
+	// declare, publish, apply, retire (rules.go). "current" and "firings" are
+	// literal segments and a rule id always carries an "@", so neither can be
+	// one.
+	mux.HandleFunc("/athanor/rules", s.handleRules)
+	mux.HandleFunc("/athanor/rules/current", s.handleRuleCurrent)
+	mux.HandleFunc("/athanor/rules/firings", s.handleRuleFirings)
+	mux.HandleFunc("/athanor/rules/{id}", s.handleRuleVersion)
 	// A database somebody else runs: propose a plan from its schema, sign the
 	// hash you read, and only then import (livedb.go). "current" is a literal
 	// segment and Go's mux prefers it to {id}, exactly as it does for the

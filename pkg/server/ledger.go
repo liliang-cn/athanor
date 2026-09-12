@@ -11,6 +11,7 @@ import (
 
 	"github.com/liliang-cn/athanor/pkg/livedb"
 	"github.com/liliang-cn/athanor/pkg/ontologies"
+	"github.com/liliang-cn/athanor/pkg/rules"
 	"github.com/liliang-cn/cortexdb/v2/pkg/authz"
 	"github.com/liliang-cn/cortexdb/v2/pkg/cortexdb"
 	"github.com/liliang-cn/cortexdb/v2/pkg/graph"
@@ -24,14 +25,15 @@ import (
 // it back. Everything an agent decided through decision_record over MCP or
 // gRPC has been landing there since. Nothing Athanor itself did was.
 //
-// Athanor performs five kinds of act and four of them are exactly what a
+// Athanor performs six kinds of act and five of them are exactly what a
 // ledger is for: a load (a graph entered the brain), a review decision (a
 // person accepted, rejected or edited a finding), an ontology act (a
-// vocabulary was drafted, proposed against, approved, published, retired),
-// and a live-database act (a plan was proposed, signed, and run against a
-// database somebody else runs). The fifth — an agent's own decision — already
-// arrives. This file records the other four in the same store, in the same
-// shape, so one query answers all five.
+// vocabulary was drafted, proposed against, approved, published, retired), a
+// live-database act (a plan was proposed, signed, and run against a database
+// somebody else runs), and a rule act (a rule was declared, put in force,
+// fired over the graph, retired). The sixth — an agent's own decision —
+// already arrives. This file records the other five in the same store, in the
+// same shape, so one query answers all six.
 //
 // # Who the actor is
 //
@@ -75,7 +77,9 @@ import (
 // `decision:athanor:ontology:<act id>`, and a live-database plan's is
 // `decision:athanor:livedb:plan:<plan>` with its runs at
 // `decision:athanor:livedb:run:<run>` and the background follows that keep it
-// in step at `decision:athanor:livedb:follow:<follow>`. RecordDecision treats a supplied id
+// in step at `decision:athanor:livedb:follow:<follow>`. A rule act is
+// `decision:athanor:rule:<verb>:<rule>`, and a firing carries the scope it ran
+// over as well. RecordDecision treats a supplied id
 // as an upsert, so re-running a load under the same name updates one entry
 // rather than growing a second — the same property that lets an agent replay
 // a transcript without doubling its ledger. It is also what lets a load find
@@ -103,7 +107,31 @@ func livedbRunDecisionID(run string) string    { return "athanor:livedb:run:" + 
 // followed again, and one entry covering all of that would lose every ending
 // but the last.
 func livedbFollowDecisionID(follow string) string { return "athanor:livedb:follow:" + follow }
-func ledgerTrim(s string) string                  { return strings.TrimSpace(s) }
+
+// The rule engine's four. They are deterministic in the rule and, for a
+// firing, in what it ran over — see ruleLedger for why that is worth the extra
+// segment.
+func ruleDraftDecisionID(rule string) string   { return "athanor:rule:draft:" + rule }
+func rulePublishDecisionID(rule string) string { return "athanor:rule:publish:" + rule }
+func ruleRetireDecisionID(rule string) string  { return "athanor:rule:retire:" + rule }
+
+// ruleApplyDecisionID names one firing of one rule over one scope. The scope
+// is a word rather than an empty segment when a firing ran over everything,
+// because "athanor:rule:apply:chain@1::dry" reads as a typo and
+// "…:chain@1:graph" reads as what it is.
+func ruleApplyDecisionID(rule, document string, dry bool) string {
+	scope := ledgerTrim(document)
+	if scope == "" {
+		scope = "graph"
+	}
+	id := "athanor:rule:apply:" + rule + ":" + scope
+	if dry {
+		id += ":dry"
+	}
+	return id
+}
+
+func ledgerTrim(s string) string { return strings.TrimSpace(s) }
 
 // ledgerEntry is one act of Athanor's, in the shape RecordDecision takes.
 type ledgerEntry struct {
@@ -253,6 +281,105 @@ func (l ontologyLedger) Record(ctx context.Context, act ontologies.Act) error {
 	}
 	_, err := l.srv.ledger.record(ctx, entry)
 	return err
+}
+
+// ruleLedger is pkg/rules' Ledger, implemented against the brain. It holds the
+// Server for ontologyLedger's reason: the store it is given to is built once
+// per brain and cached, while the ledger is a field a test replaces, and
+// reading it at call time is what keeps the two from drifting apart.
+//
+// # The ids, and what re-running does to them
+//
+// Every entry here is deterministic in the act rather than in the act's own
+// minted id, which is where this differs from the vocabulary's mirror. A
+// vocabulary act is a step in a workflow that happens once; firing a rule is a
+// thing an operator does again next week, over the same rule and the same
+// scope, and a ledger that grew an entry per run would bury the four decisions
+// that matter under a hundred repetitions of one. So a firing's entry is
+// `athanor:rule:apply:<rule>:<scope>` and re-running updates it — the same
+// property that makes a re-run of a load one entry rather than two.
+//
+// A dry run keeps its own id. It derived nothing, so letting it overwrite the
+// record of a firing that really did write edges would lose the only entry
+// that said so.
+//
+// # The premises
+//
+// Derived here rather than carried by pkg/rules, because unlike a livedb run —
+// which rests on a plan, a different subject entirely — every rule act rests on
+// an earlier act about the same rule: a firing rests on the publication that
+// put the rule in force, a publication on the declaration, a retirement on the
+// publication it ends. Knowing the subject is therefore knowing the premise's
+// id, and the side that owns the numbering is the side that should say so. One
+// that was never recorded costs a premise and not the entry: brainLedger.existing
+// drops the ids the brain does not hold.
+type ruleLedger struct{ srv *Server }
+
+func (l ruleLedger) Record(ctx context.Context, act rules.Act) error {
+	subject := ledgerTrim(act.Subject)
+	detail := map[string]any{"rule": subject, "act": act.ID}
+	// The name the act was signed with, when it is not the key that called.
+	// Nothing here promotes it to the actor; a ledger whose actor can be typed
+	// by the caller is a ledger that cannot be used as evidence.
+	actor := ledgerTrim(firstNonBlank(act.Key, act.Actor))
+	if by := ledgerTrim(act.Actor); by != "" && by != actor {
+		detail["by"] = by
+	}
+	for k, v := range act.Detail {
+		if _, taken := detail[k]; !taken {
+			detail[k] = v
+		}
+	}
+
+	var id, verdict string
+	var premises []string
+	switch act.Kind {
+	case rules.ActDraft:
+		id, verdict = ruleDraftDecisionID(subject), "declared"
+	case rules.ActPublish:
+		id, verdict = rulePublishDecisionID(subject), "published"
+		premises = []string{ruleDraftDecisionID(subject)}
+	case rules.ActRetire:
+		id, verdict = ruleRetireDecisionID(subject), "retired"
+		premises = []string{rulePublishDecisionID(subject)}
+	case rules.ActApply:
+		dry, _ := act.Detail["dry_run"].(bool)
+		scope, _ := act.Detail["document"].(string)
+		id, verdict = ruleApplyDecisionID(subject, scope, dry), "derived"
+		if dry {
+			verdict = "dry-run"
+		}
+		premises = []string{rulePublishDecisionID(subject)}
+	default:
+		return fmt.Errorf("athanor: ledger: %s is not one of the rule engine's acts", act.Kind)
+	}
+
+	entry := ledgerEntry{
+		ID:       id,
+		Kind:     act.Kind,
+		Actor:    actor,
+		Verdict:  verdict,
+		Subject:  subject,
+		Note:     act.Note,
+		Detail:   detail,
+		Premises: rulePremises(premises),
+	}
+	_, err := l.srv.ledger.record(ctx, entry)
+	return err
+}
+
+func rulePremises(ids []string) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id = ledgerTrim(id); id != "" {
+			out = append(out, cortexdb.DecisionID(id))
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Strings(out)
+	return out
 }
 
 // livedbLedger is pkg/livedb's Ledger, implemented against the brain. It
