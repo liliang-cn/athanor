@@ -3,6 +3,7 @@ package livedb
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -87,8 +88,13 @@ func (liveOpener) Changes(ctx context.Context, src Source, cp connector.Checkpoi
 	}
 	switch normalizeDriver(src.Driver) {
 	case "postgres":
+		if meta, ok := live.(*liveSource); ok {
+			if err := publicationCovers(ctx, meta.meta, livedbPublication, meta.schema, keys); err != nil {
+				return nil, err
+			}
+		}
 		return connector.NewPostgresCDCSource(src.DSN, connector.PostgresCDCOptions{
-			Publication: "athanor_livedb",
+			Publication: livedbPublication,
 			Slot:        "athanor_" + strings.TrimPrefix(src.Key(), "src_"),
 			Tables:      keys,
 			CreateSlot:  true,
@@ -244,4 +250,80 @@ func fkPredicate(cols []string, target string) string {
 		}
 	}
 	return "references_" + target
+}
+
+// livedbPublication is the pgoutput publication a follow streams through. It
+// is a constant because the check below and the stream must name the same one;
+// two spellings would be a check that passes for a publication nothing reads.
+const livedbPublication = "athanor_livedb"
+
+// publicationCovers refuses a change stream that would carry nothing.
+//
+// This is the failure the package comment on Changes promises to catch, and
+// postgres will not catch it: START_REPLICATION names the publication as a
+// plugin argument and pgoutput resolves it per change, so a name nobody
+// created matches no table and the stream opens, stays open, reports no error
+// and delivers nothing. A follow in that state answers "running" for as long
+// as anybody is willing to wait, which is the one thing a server that owns a
+// job must never say about a database it cannot see.
+//
+// Creating the publication is deliberately not attempted. It is a DDL
+// statement against somebody else's database, the credential a plan runs with
+// is expected to be a reader, and a product whose pitch is that it does not
+// touch your data until you have signed for it cannot open by issuing DDL.
+// What is owed instead is the sentence that says what is missing and the
+// statement that fixes it.
+func publicationCovers(ctx context.Context, db *sql.DB, publication, schema string, keys map[string][]string) error {
+	var all bool
+	err := db.QueryRowContext(ctx,
+		`SELECT puballtables FROM pg_publication WHERE pubname = $1`, publication).Scan(&all)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("livedb: this database has no publication %q, so a change stream would open and carry nothing. "+
+			"Creating one is a deployment step and not a read, so it is not done from here: run "+
+			"CREATE PUBLICATION %s FOR ALL TABLES; (or FOR TABLE ... naming the tables this plan covers) "+
+			"as a user with rights to, and start the follow again", publication, publication)
+	}
+	if err != nil {
+		return fmt.Errorf("livedb: read pg_publication: %w", err)
+	}
+	if all {
+		return nil
+	}
+	rows, err := db.QueryContext(ctx,
+		`SELECT tablename FROM pg_publication_tables WHERE pubname = $1 AND schemaname = $2`, publication, schema)
+	if err != nil {
+		return fmt.Errorf("livedb: read pg_publication_tables: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	published := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("livedb: read pg_publication_tables: %w", err)
+		}
+		published[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("livedb: read pg_publication_tables: %w", err)
+	}
+	var missing []string
+	for table := range keys {
+		name := table
+		if i := strings.LastIndex(name, "."); i >= 0 {
+			name = name[i+1:]
+		}
+		if !published[name] {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	// Named rather than counted: an operator adding tables to a publication
+	// needs the names, and a follow that carried half a plan silently would be
+	// the same quiet failure in a smaller size.
+	return fmt.Errorf("livedb: publication %q does not carry %s, so a follow would keep the brain in step with only part of this plan. "+
+		"Run ALTER PUBLICATION %s ADD TABLE %s; and start the follow again",
+		publication, strings.Join(missing, ", "), publication, strings.Join(missing, ", "))
 }

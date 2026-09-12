@@ -2,9 +2,11 @@ package livedb
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -1264,4 +1266,67 @@ func TestKeptProseWithNoScanIsCounted(t *testing.T) {
 			t.Errorf("scanning left %d columns counted as unscanned", scanned.Counts.UnscannedText)
 		}
 	})
+}
+
+// A change stream that would carry nothing is refused before it is opened.
+//
+// This needs a real PostgreSQL because it is a statement about postgres: the
+// failure it guards is that START_REPLICATION accepts a publication name
+// nobody created, resolves it per change, matches no table, and streams
+// silence — so a fake cannot express it and neither can a unit test over the
+// query text. Set ATHANOR_TEST_LIVEDB_DSN to a database the test may create
+// and drop a publication in; without it the test says what it would have
+// proved rather than passing quietly, because a guard against a silent
+// failure that is itself silently skipped is two of the same bug.
+func TestAFollowRefusesAPublicationThatWouldCarryNothing(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("ATHANOR_TEST_LIVEDB_DSN"))
+	if dsn == "" {
+		t.Skip("ATHANOR_TEST_LIVEDB_DSN is unset: not proving that a missing publication is refused rather than reported as a quiet database")
+	}
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	if err := db.PingContext(ctx); err != nil {
+		t.Fatalf("ping: %v", err)
+	}
+
+	keys := map[string][]string{"customers": {"id"}}
+	_, _ = db.ExecContext(ctx, `DROP PUBLICATION IF EXISTS `+livedbPublication)
+
+	err = publicationCovers(ctx, db, livedbPublication, "public", keys)
+	if err == nil {
+		t.Fatal("a missing publication was accepted; a follow would have reported running over a database it cannot see")
+	}
+	for _, want := range []string{"carry nothing", "CREATE PUBLICATION"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal does not say %q, so it does not tell an operator what to do: %v", want, err)
+		}
+	}
+
+	if _, err := db.ExecContext(ctx, `CREATE PUBLICATION `+livedbPublication+` FOR ALL TABLES`); err != nil {
+		t.Fatalf("create publication: %v", err)
+	}
+	defer func() { _, _ = db.ExecContext(ctx, `DROP PUBLICATION IF EXISTS `+livedbPublication) }()
+	if err := publicationCovers(ctx, db, livedbPublication, "public", keys); err != nil {
+		t.Fatalf("FOR ALL TABLES was refused: %v", err)
+	}
+
+	// A publication that exists and names the wrong table is the same silence
+	// in a smaller size, and the refusal has to name what is missing.
+	if _, err := db.ExecContext(ctx, `DROP PUBLICATION `+livedbPublication); err != nil {
+		t.Fatalf("drop: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `CREATE PUBLICATION `+livedbPublication+` FOR TABLE assets`); err != nil {
+		t.Fatalf("create partial publication: %v", err)
+	}
+	err = publicationCovers(ctx, db, livedbPublication, "public", keys)
+	if err == nil {
+		t.Fatal("a publication carrying none of the plan's tables was accepted")
+	}
+	if !strings.Contains(err.Error(), "customers") || !strings.Contains(err.Error(), "ALTER PUBLICATION") {
+		t.Errorf("the refusal names neither the missing table nor the statement that adds it: %v", err)
+	}
 }
