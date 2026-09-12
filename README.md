@@ -188,6 +188,63 @@ two apart. The pipeline itself is still unconfined: a job could be owned, but a
 source id could not without alchemy's spool carrying an owner, and a
 confinement with a hole in it reads as a guarantee.
 
+## Time travel
+
+CortexDB's graph has been bitemporal since v2.100.0: every node and edge
+carries when it was true and when this store believed it, superseded rows move
+into history rather than out of existence, and a read at an instant answers as
+the shelf stood then. What it has no word for is *which* instants matter. A
+timestamp somebody wrote down in a chat window is not an audit.
+
+```sh
+# name this moment
+curl -H "$K" -d '{"name":"before-the-migration","by":"liliang","note":"sds@2 is in force"}' \
+  http://127.0.0.1:47832/athanor/snapshots
+# what has been named
+curl -H "$K" http://127.0.0.1:47832/athanor/snapshots
+# what changed between two of them
+curl -H "$K" 'http://127.0.0.1:47832/athanor/snapshots/diff?from=before-the-migration&to=this-morning'
+# retire a name
+curl -H "$K" -d '{"by":"liliang","note":"superseded"}' \
+  'http://127.0.0.1:47832/athanor/snapshots/before-the-migration:drop'
+```
+
+Nothing is copied. A snapshot row is a few kilobytes whatever the brain
+weighs: the instant, what the graph counted then, the grade ladder at that
+moment, and what it rested on — which ontology version was published, and the
+loads that had landed. The graph as it stood is read back out of the brain's
+own history at the stored instant, so a snapshot and a point-in-time read
+cannot disagree. Taking one is an act like approving a vocabulary: no `by`, no
+snapshot. It reaches the ledger as `snapshot.take` — `snapshot.drop` when
+somebody retires a name — signed by the key id, with the typed name kept beside
+it. Dropping is not a delete; it frees nothing, so all it can honestly mean is
+"stop comparing against this", and the row keeps what was counted.
+
+A diff answers in the product's own words: **added**, **withdrawn**,
+**regraded**, **changed** — and the third one is the point. Storage says a row
+"changed" whether a label gained a hyphen or a fact stopped being `verified`,
+and those are not the same news. A grade change is its own kind here, and a
+fall down the knowledge contract's ladder is counted again, because a fact that
+quietly went from `verified` to `asserted` is invisible in every count of nodes
+and is the thing an operator is looking for.
+
+Four things it does not do, said here rather than discovered:
+
+- **A snapshot is always of now.** The graph could answer for a past instant;
+  `contract_tally` could not — it reads the live tables and ignores the
+  as-of — so a backdated snapshot would carry today's grades under yesterday's
+  date. The ladder is stored for the same reason: nothing can ask it again.
+- **Only the graph.** Chunks, vectors, memories and the RDF triples carry no
+  temporal columns, so a snapshot is a statement about the graph and says
+  nothing about the rest of the brain.
+- **A vacuum outruns it.** `vacuum_graph` deletes history closed before a
+  cutoff. A snapshot older than the last vacuum still names a real moment and
+  its stored counts are still true, but a diff reaching back past the cutoff
+  reports less than happened.
+- **No restore.** There is no verb that puts the brain back. Reading the past
+  is a read; writing it back over the present is a different act with different
+  consequences, and Athanor does not pretend to have thought about them yet.
+
 ## What is where
 
 | | |
@@ -195,6 +252,7 @@ confinement with a hole in it reads as a guarantee.
 | `pkg/server` | the assembly: one policy over two services, and the load |
 | `pkg/ontologies` | vocabulary versions and the signed acts on them |
 | `pkg/rules` | declared rules, who put them in force, and every firing |
+| `pkg/snapshots` | named moments, and the diff between two of them |
 | `deploy/` | systemd, Docker, compose, example key file |
 | `docs/superpowers/specs/` | the design, and why the two decisions were made |
 
@@ -206,12 +264,27 @@ and neither depends on it.
 
 ## Next
 
-Point-in-time snapshots — see the spec. The rule engine is done: a rule is
-declared under a versioned id, one is in force per lineage, retiring is not
-deleting, and firing one is a signed act whose output reaches the brain graded.
-The decision ledger is done too: loads, review decisions, ontology acts and
-rule acts are all entries, and row confinement is closed on the ledger's own
-routes and open on the pipeline, for the reason `pkg/server/auth.go` gives.
+The four the spec names are done. What is left is not in this repository.
+
+The rule engine is done: a rule is declared under a versioned id, one is in
+force per lineage, retiring is not deleting, and firing one is a signed act
+whose output reaches the brain graded. Snapshots are done, and the spec's
+account of them needs one correction: it called the CortexDB half "storage
+surgery, last", and that surgery had already landed by v2.100.0. Athanor's
+half turned out to be the naming, the signature and the translation into the
+knowledge contract's ladder — no storage work at all.
+
+The decision ledger is done: loads, review decisions, ontology acts, rule acts,
+live-database acts and snapshots are all entries. Row confinement is closed on
+the ledger's own routes and on the snapshots, both for the same reason — an
+entry and a moment each name their actor — and open on the pipeline, for the
+reason `pkg/server/auth.go` gives.
+
+What is still owed is upstream and narrow, and the snapshot section above names
+it: a tally that can be asked of the past, temporal columns on anything but the
+property graph, a vacuum that refuses to cut below the oldest kept snapshot,
+and the question of whether reading a moment back should ever be allowed to
+write over the present.
 
 ## License
 
