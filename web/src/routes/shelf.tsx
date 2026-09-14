@@ -63,6 +63,21 @@ export function Shelf() {
               })}
             </div>
           )}
+          {data?.tally?.bookkeeping && (
+            <div className="text-muted-foreground mt-3 flex items-baseline justify-between gap-3 rounded-lg border border-dashed p-3 text-sm">
+              <div className="min-w-0">
+                <span className="font-medium">bookkeeping</span>
+                <p className="mt-1.5 text-xs text-pretty">
+                  the store's own records — decisions, chunks, documents and the edges holding them
+                  in place. Not claims about anything, so not graded as if they were.
+                </p>
+              </div>
+              <div className="shrink-0 text-right tabular-nums">
+                <div className="text-lg leading-none font-medium">{data.tally.bookkeeping.nodes}</div>
+                <div className="mt-1 text-xs">{data.tally.bookkeeping.edges} edges</div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

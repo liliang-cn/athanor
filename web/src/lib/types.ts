@@ -53,6 +53,13 @@ export interface ContractTally {
   held: TallySlice;
   refused: TallySlice;
   untagged: TallySlice;
+  /** Not a grade, and deliberately not in GRADES. These are the store's own
+   *  records — decisions, chunks, documents and the edges holding them in
+   *  place — which are how the brain remembers rather than what it knows.
+   *  They used to be spread across `untagged` (the chunks, which carry no
+   *  contract) and `verified` (the decisions, which carry a signed one), and
+   *  both readings were wrong in opposite directions. */
+  bookkeeping: TallySlice;
 }
 
 export interface GradedRecord {

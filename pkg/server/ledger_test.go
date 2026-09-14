@@ -103,13 +103,21 @@ func TestALoadRecordsItselfInTheLedger(t *testing.T) {
 		t.Errorf("the chain does not name the load: %s", root.Note)
 	}
 
-	// A named person signed it, so the shelf gained one verified node.
+	// The shelf gained the entry, under bookkeeping. A named person signed it,
+	// so it carries a verified contract and GradedRecords returns it — but it
+	// is the record of a load, not an established fact about the world, and
+	// the grade buckets on that screen answer how well established the facts
+	// are. A brain whose every load added one to "verified" would report its
+	// own paperwork as its best-checked knowledge.
 	after, err := h.srv.db.ContractTally(context.Background())
 	if err != nil {
 		t.Fatalf("tally: %v", err)
 	}
-	if got := after.Verified.Nodes - before.Verified.Nodes; got != 1 {
-		t.Fatalf("verified nodes gained %d, want 1 (the decision); %+v", got, after)
+	if got := after.Bookkeeping.Nodes - before.Bookkeeping.Nodes; got != 1 {
+		t.Fatalf("bookkeeping nodes gained %d, want 1 (the decision); %+v", got, after)
+	}
+	if got := after.Verified.Nodes - before.Verified.Nodes; got != 0 {
+		t.Fatalf("verified nodes gained %d: the load's own entry was counted as a fact; %+v", got, after)
 	}
 }
 
