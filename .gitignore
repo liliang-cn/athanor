@@ -6,3 +6,6 @@ web/node_modules/
 *.db-shm
 *.db-wal
 web/*.tsbuildinfo
+
+# Agent worktrees and local harness state.
+.claude/
