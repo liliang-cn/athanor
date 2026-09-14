@@ -1398,3 +1398,68 @@ func TestTheProvenanceOfARunNeverCarriesACredential(t *testing.T) {
 		}
 	})
 }
+
+// A run can take the graph without embedding every row, and that is the whole
+// cost of a large import.
+//
+// The derived mapping gave every table a RAG plan unconditionally, so every
+// row became a chunk and every chunk an embedding. On a 400,000-row support
+// table that is 400,000 round trips to an embedding endpoint: measured on a
+// real one at about twelve kilobytes a second of progress — four and a half
+// hours — against ten minutes for the same rows with retrieval off. The graph
+// half, which is what an operational table is imported for, needs no embedder
+// at all.
+//
+// What made it worth a field rather than a note is where the cost was hidden.
+// The plan a person signs lists columns and their treatments; it never said
+// the run would embed every row, so the dominant cost of the job was not in
+// front of the person approving it.
+func TestARunCanTakeTheGraphWithoutEmbeddingEveryRow(t *testing.T) {
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		on, off := true, false
+		for _, tc := range []struct {
+			name      string
+			retrieval *bool
+			wantRAG   bool
+		}{
+			{"unset is what every run did before this field", nil, true},
+			{"asked for", &on, true},
+			{"declined", &off, false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newHarness(t, b)
+				signed := h.sign(t, h.keepFK(t, h.propose(t).ID))
+				rep, err := h.store.Run(context.Background(), RunRequest{
+					Plan: signed.ID, DSN: h.dsn, Retrieval: tc.retrieval,
+				}, "job")
+				if err != nil {
+					t.Fatalf("run: %v", err)
+				}
+				if rep.RowsRead == 0 {
+					t.Fatal("no rows were read, so this proves nothing about what happened to them")
+				}
+				if len(h.importer.plans) != 1 {
+					t.Fatalf("the importer ran %d times", len(h.importer.plans))
+				}
+				var withRAG, withKG int
+				for _, tp := range h.importer.plans[0].Tables {
+					if tp.RAG != nil {
+						withRAG++
+					}
+					if tp.KG != nil {
+						withKG++
+					}
+				}
+				if got := withRAG > 0; got != tc.wantRAG {
+					t.Errorf("%d tables carry a RAG plan, want %v", withRAG, tc.wantRAG)
+				}
+				// The graph half is there either way: it is the half that
+				// answers what an operational table is imported for, and the
+				// half that does not depend on an embedder being up.
+				if withKG == 0 {
+					t.Error("no table carries a graph plan")
+				}
+			})
+		}
+	})
+}

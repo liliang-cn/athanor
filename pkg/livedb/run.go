@@ -88,7 +88,8 @@ func (s *storeImpl) run(ctx context.Context, req RunRequest, actor string) (RunR
 		if err != nil {
 			return RunReport{}, fmt.Errorf("livedb: read the desensitized schemas: %w", err)
 		}
-		if mapping, err = s.deriveMapping(ctx, live, kept, namespace); err != nil {
+		retrieval := req.Retrieval == nil || *req.Retrieval
+		if mapping, err = s.deriveMapping(ctx, live, kept, namespace, retrieval); err != nil {
 			return RunReport{}, err
 		}
 	}
@@ -202,7 +203,7 @@ const keySeparator = "|"
 // deriveMapping builds the deterministic mapping: primary key as the id, kept
 // columns as content and properties, foreign keys as edges. It calls no model,
 // which is the point — a mapping a model invented is a mapping nobody signed.
-func (s *storeImpl) deriveMapping(ctx context.Context, live Live, kept []importflow.Schema, namespace string) (importflow.MappingPlan, error) {
+func (s *storeImpl) deriveMapping(ctx context.Context, live Live, kept []importflow.Schema, namespace string, retrieval bool) (importflow.MappingPlan, error) {
 	sort.Slice(kept, func(i, j int) bool { return kept[i].Table < kept[j].Table })
 	out := importflow.MappingPlan{Tables: make(map[string]importflow.TablePlan, len(kept))}
 
@@ -236,13 +237,16 @@ func (s *storeImpl) deriveMapping(ctx context.Context, live Live, kept []importf
 		for _, n := range names {
 			lines = append(lines, n+": {"+n+"}")
 		}
-		rag := &importflow.RAGPlan{
-			Namespace:   namespace,
-			ContentTmpl: strings.Join(lines, "\n"),
-			Metadata:    names,
-		}
-		if len(usable) == 1 {
-			rag.IDColumn = usable[0]
+		var rag *importflow.RAGPlan
+		if retrieval {
+			rag = &importflow.RAGPlan{
+				Namespace:   namespace,
+				ContentTmpl: strings.Join(lines, "\n"),
+				Metadata:    names,
+			}
+			if len(usable) == 1 {
+				rag.IDColumn = usable[0]
+			}
 		}
 
 		tp := importflow.TablePlan{RAG: rag}
@@ -251,6 +255,15 @@ func (s *storeImpl) deriveMapping(ctx context.Context, live Live, kept []importf
 		// no KG entity. A node with no stable id is a node that duplicates on
 		// every re-run, and a graph that grows a second copy of every row per
 		// import is worse than a graph missing that table.
+		//
+		// With retrieval off and no usable key there is nothing left to write
+		// for that table, and the plan says so rather than emitting an empty
+		// one: an operator reading the report sees which tables contributed
+		// nothing and why.
+		if len(usable) == 0 && !retrieval {
+			out.Tables[sc.Table] = importflow.TablePlan{Skip: true}
+			continue
+		}
 		if len(usable) > 0 {
 			kg, err := s.deriveKG(ctx, live, sc.Table, usable, names, present)
 			if err != nil {

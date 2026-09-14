@@ -302,6 +302,25 @@ type RunRequest struct {
 	Mapping *importflow.MappingPlan `json:"mapping,omitempty"`
 	// Namespace is the RAG namespace rows land in. Empty takes the plan id.
 	Namespace string `json:"namespace,omitempty"`
+	// Retrieval says whether rows also become retrievable text — one chunk
+	// and one embedding each. Nil is true, which is what every run did before
+	// this field existed.
+	//
+	// It is worth a field because it is the whole cost of a large import and
+	// nothing made it visible. The derived mapping gives every table a RAG
+	// plan unconditionally, so a 400,000-row support table is 400,000 round
+	// trips to an embedding endpoint — measured here at about twelve kilobytes
+	// a second of progress, four and a half hours, against ten minutes for the
+	// same rows with this off. And the plan a person signs shows columns and
+	// treatments; it never said that the run would embed every row, so the
+	// dominant cost of the job was not in front of the person approving it.
+	//
+	// What it buys is real and narrow: semantic search over individual rows.
+	// On an operational table — tickets, orders, events — the value is in
+	// aggregation, and aggregation is what the graph half does. A caller who
+	// wants "find me tickets that read like this one" says so; a caller who
+	// wants "which tool costs the most minutes" never needed it.
+	Retrieval *bool `json:"retrieval,omitempty"`
 	// Follow keeps the brain in step with the database after the first pass,
 	// reading changes through this same plan. It returns when ctx is done.
 	Follow bool `json:"follow,omitempty"`
