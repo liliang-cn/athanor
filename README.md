@@ -44,10 +44,23 @@ curl -H "$K" -d '{"source_ids":["<id>"],"ontology":"<json>","part":"prose","mode
 # 2. held — two sources disagree — review it
 open http://127.0.0.1:47832/ui/
 # 3. finished → into the brain, graded
-curl -H "$K" -d '{"job":"<id>"}' http://127.0.0.1:47832/athanor/loads
+curl -H "$K" -d '{"job":"<id>","load":"runbook"}' http://127.0.0.1:47832/athanor/loads
 # 4. ask the brain how it knows
 curl -H "$K" -d '{}' http://127.0.0.1:47832/brain/v1/tools/contract_tally
+# what this brain holds, and how to take one back out
+curl -H "$K" http://127.0.0.1:47832/athanor/loads
+curl -H "$K" -X DELETE -d '{"by":"liliang","why":"loaded under the wrong vocabulary"}' \
+  http://127.0.0.1:47832/athanor/loads/runbook
 ```
+
+A load can be listed and it can be dropped, and for a while it could be
+neither: the only thing that could be said about a load already in the brain
+was to put another graph over it, which answers "this one is wrong" with "here
+is a different one" — and there is not always a different one. A drop names a
+person and a reason, like every act that changes what the shelf stands on, and
+more so than most: what it takes is not recoverable from anything else here, so
+its ledger entry is the only place the reason will survive. It is the one entry
+in this store that is about something no longer in it.
 
 A held job is refused at step 3 until someone answers at step 2. The brain
 holds only graphs that finished, and finished means reviewed when review was

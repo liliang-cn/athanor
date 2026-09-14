@@ -49,8 +49,13 @@ type loadRequest struct {
 }
 
 func (s *Server) handleLoads(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		httpError(w, http.StatusMethodNotAllowed, "POST a {job, load} document")
+	switch r.Method {
+	case http.MethodGet:
+		s.handleLoadsCatalogue(w, r)
+		return
+	case http.MethodPost:
+	default:
+		httpError(w, http.StatusMethodNotAllowed, "POST a {job, load} document, or GET the catalogue")
 		return
 	}
 	key, code, msg := s.requestKey(r)

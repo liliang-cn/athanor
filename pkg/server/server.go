@@ -18,6 +18,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"google.golang.org/grpc"
@@ -173,6 +174,17 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	// they get the same door as every other route (gate.go).
 	mux.Handle("/graph/", s.requireKey(http.StripPrefix("/graph", view.Handler())))
 	mux.HandleFunc("/athanor/loads", s.handleLoads)
+	// One load, by name. The only method is DELETE: a load is read through the
+	// graph it wrote and there is nothing here a GET would add, while removing
+	// one is the verb the collection route cannot carry.
+	mux.HandleFunc("/athanor/loads/", func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/athanor/loads/")
+		if r.Method != http.MethodDelete {
+			httpError(w, http.StatusMethodNotAllowed, "DELETE /athanor/loads/{name} removes one load; GET the collection to see them")
+			return
+		}
+		s.handleLoadDrop(w, r, name)
+	})
 	// The vocabulary as a workflow rather than a string pasted into every job:
 	// draft, propose from a run, approve, publish (ontologies.go). "current" is
 	// a literal segment and an id always carries an "@", so it cannot be one.
