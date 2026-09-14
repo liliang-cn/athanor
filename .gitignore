@@ -9,3 +9,6 @@ web/*.tsbuildinfo
 
 # Agent worktrees and local harness state.
 .claude/
+
+# Playwright screenshots and snapshots from driving the real app.
+.playwright-mcp/
