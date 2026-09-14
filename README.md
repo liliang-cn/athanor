@@ -27,7 +27,10 @@ Two ports: gRPC on `127.0.0.1:47831` carrying `alchemy.v1` and `cortexdb.v1`,
 HTTP on `127.0.0.1:47832` carrying their REST translations, the review UI
 (`/ui`), the live graph (`/graph/`), metrics (`/metrics`) and the front page.
 `deploy/` has a hardened systemd unit and a container image whose healthcheck is
-the binary itself.
+the binary itself. `deploy/push user@host` copies this checkout onto a host and
+rebuilds there; use it rather than rsync by hand, because the key policy and the
+`.env` beside it live only on the host and a `--delete` without them protected
+takes them with it.
 
 Existing CortexDB clients point `CORTEXDB_REMOTE` at the gRPC port and need no
 change. Every door reads one key file — see `deploy/keys.example.json`.

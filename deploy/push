@@ -1,0 +1,40 @@
+#!/bin/sh
+# Copy this checkout onto a host and rebuild the container there.
+#
+#   deploy/push ops@192.168.123.64            # to ~/athanor
+#   deploy/push ops@host /srv/athanor
+#
+# It exists because the obvious one-liner is wrong in a way that only shows up
+# once. `rsync -a --delete` onto the deployment directory deletes the two files
+# that are not in the repository and must never leave the host — the key policy
+# and the .env beside it — and the container then restarts every two seconds
+# saying it cannot open /run/athanor/keys.json, with the secrets it needed
+# gone. That has happened here more than once, each time to somebody who knew
+# about it, which is the argument for a script rather than a note.
+#
+# The protection is --filter 'P ...' rather than --exclude: exclude says "do
+# not send this", protect says "do not delete this on the far side", and it is
+# the deletion that does the damage.
+set -eu
+
+host=${1:?usage: deploy/push user@host [remote-dir]}
+dir=${2:-athanor}
+here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+rsync -az --delete \
+	--filter 'P .env' \
+	--filter 'P keys.json' \
+	--filter 'P vault.key' \
+	--exclude '.git' \
+	--exclude 'node_modules' \
+	"$here/" "$host:$dir/"
+
+# The proxy is a build-time argument because the daemon does not inherit the
+# host's environment, and a Go build with no route out fails seven minutes in
+# on a module nobody has heard of.
+ssh "$host" "cd $dir/deploy/docker && \
+	docker compose build \
+		--build-arg HTTP_PROXY=\${HTTP_PROXY:-http://192.168.123.61:43127} \
+		--build-arg HTTPS_PROXY=\${HTTPS_PROXY:-http://192.168.123.61:43127} \
+		--build-arg NO_PROXY=localhost,127.0.0.1,192.168.0.0/16 \
+	&& docker compose up -d"
