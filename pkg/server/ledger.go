@@ -106,12 +106,12 @@ const (
 	snapshotDrop = "drop"
 )
 
-func loadDecisionID(job, load string) string   { return "athanor:load:" + job + ":" + load }
+func loadDecisionID(job, load string) string { return "athanor:load:" + job + ":" + load }
 
 // An assertion is named by the load it wrote, which is derived from the digest
 // of what was asserted: re-sending the same correction converges on one entry
 // rather than filing a second one saying the same thing.
-func assertionDecisionID(load string) string { return "athanor:assert:" + load }
+func assertionDecisionID(load string) string   { return "athanor:assert:" + load }
 func reviewDecisionID(job, item string) string { return "athanor:review:" + job + ":" + item }
 func ontologyDecisionID(actID string) string   { return "athanor:ontology:" + actID }
 func livedbPlanDecisionID(plan string) string  { return "athanor:livedb:plan:" + plan }

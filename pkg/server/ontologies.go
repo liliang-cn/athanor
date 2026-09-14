@@ -120,6 +120,13 @@ func (s *Server) handleOntologies(w http.ResponseWriter, r *http.Request) {
 			httpError(w, http.StatusBadRequest, "body: "+err.Error())
 			return
 		}
+		// Refused here if this brain could never load a graph under it
+		// (reserved.go). Everything the judgement needs is already in hand,
+		// and the alternative is finding out after an extraction.
+		if bad := reservedAttributes(document); len(bad) > 0 {
+			httpError(w, http.StatusBadRequest, reservedRefusal(bad))
+			return
+		}
 		// The drafter is the key that presented itself. A draft is not yet a
 		// judgement about anything — approve and publish are, and those take a
 		// name in the body — so the door's own record of who is calling is the

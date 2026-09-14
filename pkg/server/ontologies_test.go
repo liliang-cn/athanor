@@ -332,3 +332,56 @@ func TestTwoLineagesArePublishedIndependently(t *testing.T) {
 		t.Fatalf("list is %s (%v)", listBody, err)
 	}
 }
+
+// A vocabulary this brain could never load under is refused when it is
+// written, not after a corpus has been extracted under it.
+//
+// The store keeps "name", "description" and a few others for itself, and the
+// connector refuses an attribute that lands on one — on the first entity of
+// the load, which is after every model call and every question a person
+// answered. Sixty-seven documents spent thirty-one minutes and twenty-eight
+// review questions under a vocabulary that was unusable from the moment it was
+// saved. Every input to that judgement was on hand before the first call.
+func TestAVocabularyThatCollidesWithTheBrainIsRefusedWhenItIsWritten(t *testing.T) {
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
+
+	body := `{"id":"docs@1","parts":{"prose":{
+	  "entities":[{"name":"Tool","description":"a tool","attributes":["name","said"]}],
+	  "relations":[]}}}`
+	code, answer := h.do(http.MethodPost, "/athanor/ontologies", "op-secret", body)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", code, answer)
+	}
+	// The refusal has to be actionable in one round trip: which type, which
+	// attribute, and what the brain keeps.
+	for _, want := range []string{"Tool", `\"name\"`, "description"} {
+		if !strings.Contains(answer, want) {
+			t.Errorf("the refusal does not mention %s: %s", want, answer)
+		}
+	}
+
+	// The same vocabulary without the collision is accepted, so the check is
+	// about the clash and not about attributes.
+	clean := `{"id":"docs@1","parts":{"prose":{
+	  "entities":[{"name":"Tool","description":"a tool","attributes":["said"]}],
+	  "relations":[]}}}`
+	if code, answer := h.do(http.MethodPost, "/athanor/ontologies", "op-secret", clean); code != http.StatusCreated {
+		t.Fatalf("a vocabulary with no clash was refused: %d %s", code, answer)
+	}
+}
+
+// A relation's attributes are checked against what the brain writes on an
+// edge, which is a different list from a node's.
+func TestARelationAttributeIsCheckedAgainstTheEdgeProperties(t *testing.T) {
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
+	body := `{"id":"docs@2","parts":{"prose":{
+	  "entities":[{"name":"Tool","attributes":["said"]}],
+	  "relations":[{"name":"uses","from":["Tool"],"to":["Tool"],"attributes":["inferred"]}]}}}`
+	code, answer := h.do(http.MethodPost, "/athanor/ontologies", "op-secret", body)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", code, answer)
+	}
+	if !strings.Contains(answer, "uses") || !strings.Contains(answer, "inferred") {
+		t.Errorf("the refusal does not name the relation and the attribute: %s", answer)
+	}
+}
