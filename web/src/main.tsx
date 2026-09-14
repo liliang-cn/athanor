@@ -6,6 +6,7 @@ import "@/index.css";
 import { SessionProvider, useSession } from "@/lib/session";
 import { Layout } from "@/components/layout";
 import { SignIn } from "@/routes/sign-in";
+import { Ontology } from "@/routes/ontology";
 import { Shelf } from "@/routes/shelf";
 import { Decisions } from "@/routes/decisions";
 import { DecisionChain } from "@/routes/decision-chain";
@@ -36,6 +37,7 @@ function App() {
         <Route index element={<Shelf />} />
         <Route path="review" element={<Review />} />
         <Route path="review/:jobId" element={<Review />} />
+        <Route path="ontology" element={<Ontology />} />
         <Route path="decisions" element={<Decisions />} />
         <Route path="decisions/*" element={<DecisionChain />} />
         <Route path="import" element={<Import />} />

@@ -77,6 +77,22 @@ const KIND_LABEL: Record<string, string> = {
   low_confidence: "the model was unsure",
 };
 
+/** The verb somebody already used on this item, as the screen spells verbs.
+ *  `always` is an accept that also made a rule; the queue shows the act. */
+function answerVerb(f: Finding): ReviewVerb | undefined {
+  switch (f.answer?.verb) {
+    case "REVIEW_VERB_ACCEPT":
+    case "REVIEW_VERB_ALWAYS":
+      return "accept";
+    case "REVIEW_VERB_EDIT":
+      return "edit";
+    case "REVIEW_VERB_REJECT":
+      return "reject";
+    default:
+      return undefined;
+  }
+}
+
 export function Review() {
   const { jobId } = useParams();
   const navigate = useNavigate();
@@ -266,7 +282,14 @@ function Queue({ jobId }: { jobId: string }) {
   }
   if (!answer) return null;
 
-  const left = answer.items.filter((f) => !answered[f.id]).length;
+  // Answered means the server says so, with this session's own sends as the
+  // optimistic half between a click and the reload after it. The map used to
+  // be the only record, so a reviewer who reloaded the page got their answered
+  // questions back looking untouched — a browser's private opinion of what the
+  // store holds, which is the disagreement this product exists to prevent.
+  const verbOf = (f: Finding): ReviewVerb | undefined =>
+    answerVerb(f) ?? answered[f.id];
+  const left = answer.items.filter((f) => !verbOf(f)).length;
   const held = answer.state === "JOB_STATE_NEEDS_REVIEW";
 
   return (
@@ -296,7 +319,7 @@ function Queue({ jobId }: { jobId: string }) {
       ) : (
         <div className="space-y-3">
           {answer.items.map((f) => (
-            <FindingCard key={f.id} finding={f} answeredAs={answered[f.id]} onSend={send} />
+            <FindingCard key={f.id} finding={f} answeredAs={verbOf(f)} onSend={send} />
           ))}
         </div>
       )}
@@ -322,7 +345,9 @@ function FindingCard({
           {answeredAs && (
             <Badge variant="outline" className="gap-1">
               <CheckCircle2 className="size-3" />
-              answered · {answeredAs}
+              {finding.answer
+                ? `${answeredAs} · ${finding.answer.by}${finding.answer.at ? ` · ${new Date(finding.answer.at).toLocaleString()}` : ""}`
+                : `answered · ${answeredAs}`}
             </Badge>
           )}
         </div>
@@ -340,6 +365,9 @@ function FindingCard({
             {finding.provenance.producer && ` · ${finding.provenance.producer.replace(/^PRODUCER_/, "").toLowerCase()}`}
             {finding.provenance.model && ` · ${finding.provenance.model}`}
           </p>
+        )}
+        {finding.answer?.note && (
+          <p className="text-sm text-pretty">{finding.answer.note}</p>
         )}
         {!answeredAs && <Answers finding={finding} onSend={onSend} />}
       </CardContent>

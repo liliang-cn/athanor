@@ -18,6 +18,12 @@ import { cn } from "@/lib/utils";
  * and it is in the same list because a person navigating a product does not
  * care which repository drew the page.
  *
+ * Ontology used to be another, and that one was wrong rather than merely
+ * borrowed: CortexDB's ontology page reads CortexDB's ontology tables, which
+ * Athanor never writes, so a brain with five published versions of a
+ * vocabulary opened a page saying none was saved. Athanor keeps its own, with
+ * a workflow behind it, and now shows it.
+ *
  * Review used to be one of them, pointing at alchemy's own page. That page
  * asked for a job id on an otherwise empty screen before it would draw
  * anything, which is a modal dialog painted as a whole application. It is a
@@ -30,7 +36,7 @@ const NAV = [
   { to: "/review", label: "Review", icon: ClipboardCheck },
   { to: "/import", label: "Import", icon: Download },
   { to: "/graph/", label: "Graph", icon: Network, external: true },
-  { to: "/graph/ontology", label: "Ontology", icon: BookMarked, external: true },
+  { to: "/ontology", label: "Ontology", icon: BookMarked },
   { to: "/decisions", label: "Decisions", icon: Gavel },
 ];
 

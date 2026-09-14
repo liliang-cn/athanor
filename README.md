@@ -48,6 +48,10 @@ curl -H "$K" -d '{"source_ids":["<id>"],"ontology":"<json>","part":"prose","mode
 open http://127.0.0.1:47832/ui/
 # 3. finished → into the brain, graded
 curl -H "$K" -d '{"job":"<id>","load":"runbook"}' http://127.0.0.1:47832/athanor/loads
+# 3b. a record in it is wrong: say so, and say what it replaces
+curl -H "$K" -d '{"by":"liliang","entities":[…],
+  "supersedes":[{"retires":"<node id>","reason":"decommissioned in March"}]}' \
+  http://127.0.0.1:47832/athanor/assertions
 # 4. ask the brain how it knows
 curl -H "$K" -d '{}' http://127.0.0.1:47832/brain/v1/tools/contract_tally
 # what this brain holds, and how to take one back out

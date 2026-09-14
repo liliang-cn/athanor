@@ -188,6 +188,8 @@ func New(ctx context.Context, opts Options) (*Server, error) {
 	// The vocabulary as a workflow rather than a string pasted into every job:
 	// draft, propose from a run, approve, publish (ontologies.go). "current" is
 	// a literal segment and an id always carries an "@", so it cannot be one.
+	// Saying something directly, and saying what it replaces (assertions.go).
+	mux.HandleFunc("/athanor/assertions", s.handleAssertions)
 	mux.HandleFunc("/athanor/ontologies", s.handleOntologies)
 	mux.HandleFunc("/athanor/ontologies/current", s.handleOntologyCurrent)
 	mux.HandleFunc("/athanor/ontologies/{id}", s.handleOntologyVersion)

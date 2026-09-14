@@ -241,6 +241,14 @@ export interface Finding {
     model?: string;
     ontology?: string;
   };
+  /** What somebody already said about this item, from the server rather than
+   *  from this browser's memory of its own clicks. Absent is unanswered. */
+  answer?: {
+    verb: "REVIEW_VERB_ACCEPT" | "REVIEW_VERB_EDIT" | "REVIEW_VERB_REJECT" | "REVIEW_VERB_ALWAYS";
+    by: string;
+    note?: string;
+    at?: string;
+  };
 }
 
 export type JobState =
@@ -289,4 +297,55 @@ export interface LoadRecord {
   digest: string;
   started: string;
   finished?: string;
+}
+
+/**
+ * The vocabulary, and its versions.
+ *
+ * Mirrors pkg/ontologies.Version and alchemy.Proposal. The nav used to point
+ * at CortexDB's own ontology page for this, which reads CortexDB's ontology
+ * tables — a different store that Athanor never writes — so the screen said
+ * "no ontology is saved in this store" about a brain with five published
+ * versions in it.
+ */
+export type OntologyState = "draft" | "proposed" | "approved" | "published" | "retired";
+
+export type ProposalKind = "entity" | "relation" | "relation_ends" | "attribute";
+
+export interface Proposal {
+  kind: ProposalKind;
+  /** The undeclared type, in the spelling the records used. */
+  type: string;
+  /** How many records used it: a vocabulary gap or a typo. */
+  records: number;
+  from?: string[];
+  to?: string[];
+  /** What the ontology already says, for a widening — so the reader sees a diff. */
+  declared_from?: string[];
+  declared_to?: string[];
+  sources?: string[];
+  producers?: string[];
+  example?: { id?: string; source?: string; chunk?: number };
+}
+
+export interface OntologyVersion {
+  id: string;
+  lineage: string;
+  state: OntologyState;
+  parent?: string;
+  document: unknown;
+  part?: string;
+  proposals?: Proposal[];
+  proposed_from?: string;
+  created_by?: string;
+  created_at: string;
+  approved_by?: string;
+  approved_at?: string;
+  published_at?: string;
+  retired_at?: string;
+  note?: string;
+}
+
+export interface OntologyList {
+  versions: OntologyVersion[] | null;
 }
