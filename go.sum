@@ -59,10 +59,10 @@ github.com/klauspost/compress v1.18.6 h1:2jupLlAwFm95+YDR+NwD2MEfFO9d4z4Prjl1XXD
 github.com/klauspost/compress v1.18.6/go.mod h1:cwPg85FWrGar70rWktvGQj8/hthj3wpl0PGDogxkrSQ=
 github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728 h1:QwWKgMY28TAXaDl+ExRDqGQltzXqN/xypdKP86niVn8=
 github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728/go.mod h1:1fEHWurg7pvf5SG6XNE5Q8UZmOwex51Mkx3SLhrW5B4=
-github.com/liliang-cn/alchemy v0.6.8 h1:MqplezTx/aN2DV4w4Bm5Q4B8J6Bx/4fgof8vU6ouSPY=
-github.com/liliang-cn/alchemy v0.6.8/go.mod h1:n3N0sfAj7pP10GvB70FiEPb3YhZ3cQqcfL6EZ9/SeK8=
-github.com/liliang-cn/alchemy/connectors v0.6.8 h1:pzgYWXvl5JoqhiU9ti/JZibdvEKdOSoxAAZGs81i6v0=
-github.com/liliang-cn/alchemy/connectors v0.6.8/go.mod h1:4rcoOl/Z8Y53JIR4h04gSGncWtO4d+7ZR+jPO0r0MZA=
+github.com/liliang-cn/alchemy v0.6.9 h1:KvtJGeOh8r4EnG8W6D56uT2cSrgh1Ova5oxbE7KFaEs=
+github.com/liliang-cn/alchemy v0.6.9/go.mod h1:n3N0sfAj7pP10GvB70FiEPb3YhZ3cQqcfL6EZ9/SeK8=
+github.com/liliang-cn/alchemy/connectors v0.6.9 h1:CKvbIOYYQ3U2K0jRqHn1IpS708pQSjLuzg8yF9HF+mk=
+github.com/liliang-cn/alchemy/connectors v0.6.9/go.mod h1:4rcoOl/Z8Y53JIR4h04gSGncWtO4d+7ZR+jPO0r0MZA=
 github.com/liliang-cn/cortexdb/v2 v2.109.0 h1:D8G00vsVP3sfCT6BHWsXHAglt0pRlXcL7ezdPpHooDc=
 github.com/liliang-cn/cortexdb/v2 v2.109.0/go.mod h1:O4EPYRbBsEpEsRisT2Hs2jhKVoEMPuRm87xAXpwLMwc=
 github.com/mattn/go-isatty v0.0.20 h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=

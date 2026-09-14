@@ -14,13 +14,20 @@ import { cn } from "@/lib/utils";
  * not in the bar: the control that ends a session should not sit a mis-tap
  * away from the one used to move between screens.
  *
- * Two of these are not Athanor's own screens — Review is alchemy's queue and
- * Graph is CortexDB's live view — and they are in the same list because a
- * person navigating a product does not care which repository drew the page.
+ * One of these is not Athanor's own screen — Graph is CortexDB's live view —
+ * and it is in the same list because a person navigating a product does not
+ * care which repository drew the page.
+ *
+ * Review used to be one of them, pointing at alchemy's own page. That page
+ * asked for a job id on an otherwise empty screen before it would draw
+ * anything, which is a modal dialog painted as a whole application. It is a
+ * route here now, and picking a job is a dropdown with a dialog behind it.
+ * The old page is still served at /ui/ and still works; nothing in this
+ * product links to it.
  */
 const NAV = [
   { to: "/", label: "Shelf", icon: Boxes, end: true },
-  { to: "/ui/", label: "Review", icon: ClipboardCheck, external: true },
+  { to: "/review", label: "Review", icon: ClipboardCheck },
   { to: "/import", label: "Import", icon: Download },
   { to: "/graph/", label: "Graph", icon: Network, external: true },
   { to: "/graph/ontology", label: "Ontology", icon: BookMarked, external: true },

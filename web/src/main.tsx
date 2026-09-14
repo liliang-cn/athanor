@@ -11,6 +11,7 @@ import { Decisions } from "@/routes/decisions";
 import { DecisionChain } from "@/routes/decision-chain";
 import { Import } from "@/routes/import";
 import { LiveDb } from "@/routes/livedb";
+import { Review } from "@/routes/review";
 import { Runs } from "@/routes/runs";
 import { Follows } from "@/routes/follows";
 
@@ -33,6 +34,8 @@ function App() {
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Shelf />} />
+        <Route path="review" element={<Review />} />
+        <Route path="review/:jobId" element={<Review />} />
         <Route path="decisions" element={<Decisions />} />
         <Route path="decisions/*" element={<DecisionChain />} />
         <Route path="import" element={<Import />} />

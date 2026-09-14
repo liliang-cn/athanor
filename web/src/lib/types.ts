@@ -195,3 +195,91 @@ export interface Follow {
    *  returns when the following is over. */
   first_pass?: RunReport;
 }
+
+/* -------------------------------------------------------------- the review */
+
+/** REVIEW_KIND_* without the prefix, which is what the screen shows. */
+export type FindingKind = "conflict" | "duplicate" | "violation" | "guess" | "low_confidence" | "unknown";
+
+/** REVIEW_VERB_* — the three answers a queue item takes. */
+export type ReviewVerb = "accept" | "edit" | "reject";
+
+/** One record a finding is about. The queue names its targets rather than
+ *  rendering them, so a screen can show the ends of an edge without parsing
+ *  a subject string back apart. */
+export interface FindingTarget {
+  kind?: string;
+  id?: string;
+  from?: string;
+  to?: string;
+  type?: string;
+  key?: string;
+}
+
+/** One question in a job's queue. */
+export interface Finding {
+  id: string;
+  kind: FindingKind;
+  /** The record an answer acts on — not always the side a reader clicked. */
+  subject: string;
+  summary: string;
+  /** The class of mistake, and what an `always` rule would match on. */
+  shape?: string;
+  rank?: number;
+  targets?: FindingTarget[];
+  provenance?: {
+    source?: string;
+    chunk?: number;
+    producer?: string;
+    model?: string;
+    ontology?: string;
+  };
+}
+
+export type JobState =
+  | "JOB_STATE_PENDING"
+  | "JOB_STATE_RUNNING"
+  | "JOB_STATE_NEEDS_REVIEW"
+  | "JOB_STATE_SUCCEEDED"
+  | "JOB_STATE_FAILED";
+
+export interface Job {
+  id: string;
+  state: JobState;
+  stage?: string;
+  error?: string;
+  created_at?: string;
+  expires_at?: string;
+}
+
+export interface FindingsAnswer {
+  job_id: string;
+  state: JobState;
+  items: Finding[];
+}
+
+/** What a decision sends. `edit` is the only one that carries changes, and
+ *  `into` is the only change that says two records are one record. */
+export interface Decision {
+  item_id: string;
+  verb: "REVIEW_VERB_ACCEPT" | "REVIEW_VERB_EDIT" | "REVIEW_VERB_REJECT";
+  by: string;
+  note?: string;
+  edit?: { type?: string; name?: string; from?: string; to?: string; into?: string };
+}
+
+export interface DecideAnswer {
+  job_id: string;
+  state: JobState;
+  applied: number;
+  remaining_holding: number;
+  rejected?: { item_id: string; reason: string }[];
+}
+
+/** One load the brain holds, from GET /athanor/loads. */
+export interface LoadRecord {
+  id: string;
+  digest: string;
+  started: string;
+  finished?: string;
+}

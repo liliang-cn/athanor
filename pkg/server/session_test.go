@@ -288,3 +288,55 @@ func TestAnExplicitHeaderIsNotOverwrittenByTheCookie(t *testing.T) {
 		t.Fatalf("a request carrying its own bad token was answered %d; the cookie overrode it", resp.StatusCode)
 	}
 }
+
+// TestTheBrowserSessionReachesThePipelineToo is why Review could only ever be
+// a link out of the product.
+//
+// The gateway was mounted raw at /v1/ and wrapped at /ui/, so a browser
+// holding Athanor's session cookie could open alchemy's own page and could not
+// call the routes behind it. Any screen this product drew over the queue would
+// have had to ask for a bearer key that the session deliberately keeps out of
+// reach of scripts — so there was no screen, and the nav pointed somewhere
+// else instead.
+func TestTheBrowserSessionReachesThePipelineToo(t *testing.T) {
+	h := newHarness(t, fakeRunner{result: cannedResult()})
+	jobID := uploadAndCreate(t, h)
+
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatalf("jar: %v", err)
+	}
+	client := &http.Client{Jar: jar}
+	base := "http://" + h.httpAddr
+
+	// Sign in the way the browser does, and then use nothing but the cookie.
+	resp, err := client.Post(base+"/api/session", "application/json",
+		strings.NewReader(`{"key":"op-secret"}`))
+	if err != nil {
+		t.Fatalf("sign in: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("sign in = %d", resp.StatusCode)
+	}
+
+	resp, err = client.Get(base + "/v1/jobs/" + jobID + "/findings")
+	if err != nil {
+		t.Fatalf("findings: %v", err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the session could not read a job's queue: %d — %s", resp.StatusCode, body)
+	}
+
+	// And a browser with no session still cannot.
+	bare, err := http.Get(base + "/v1/jobs/" + jobID + "/findings")
+	if err != nil {
+		t.Fatalf("bare: %v", err)
+	}
+	bare.Body.Close()
+	if bare.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no session read a job's queue: %d", bare.StatusCode)
+	}
+}

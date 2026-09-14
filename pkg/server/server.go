@@ -278,9 +278,17 @@ func (s *Server) Serve(ctx context.Context) error {
 		return fmt.Errorf("athanor: gateway: %w", err)
 	}
 	s.gatewayConn, s.stopGateway = conn, cancel
-	s.mux.Handle("/v1/", gw)
-	// One sign-in for both browser UIs: Athanor's cookie becomes the header
-	// alchemy's viewer already accepts (session.go).
+	// One sign-in, everywhere a browser goes. Athanor's cookie becomes the
+	// header the gateway already accepts (session.go), which is what lets the
+	// product's own review screen call the pipeline's routes with the session
+	// the operator already has. It was mounted raw, so the only way to reach a
+	// job's queue from a browser was alchemy's own page — which is why Review
+	// used to be a link out of the product rather than a screen in it.
+	//
+	// A caller that presents its own Authorization header is untouched: the
+	// wrapper only fills one in, and the key a curl user presents is still the
+	// key the policy checks.
+	s.mux.Handle("/v1/", s.oneSignIn(gw))
 	s.mux.Handle("/ui/", s.oneSignIn(gw))
 	close(s.grpcAddrReady)
 
