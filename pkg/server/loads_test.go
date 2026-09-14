@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -166,4 +167,57 @@ func TestAnUnknownJobIsNotFoundAndATypoInTheBodyIsRefused(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("a misspelled field was accepted: %d", resp.StatusCode)
 	}
+}
+
+// A corpus too big for one message is loadable.
+//
+// GetResult refuses a result over the limit rather than truncating it and
+// names StreamResult in the refusal; this route passed the refusal on with a
+// sentence admitting the gap. What that meant in practice was found by trying
+// it: sixty-seven documents of real documentation extracted for twenty-nine
+// minutes, twenty-eight conflicts answered by hand, and then a 3.05MB graph
+// that could not be put into the brain at all. The expensive steps succeeded
+// and the last, cheapest one failed.
+//
+// The graph here is sized past the default limit on purpose. It is a slow test
+// for a reason that is not incidental: the bug only exists above a threshold,
+// so a fixture under it would pass against the broken code.
+func TestACorpusTooBigForOneMessageStillLoads(t *testing.T) {
+	big := cannedResult()
+	prov := big.Entities[0].Provenance
+	// Each entity carries enough text to cross 3MiB in a few thousand records,
+	// which is what a documentation corpus looks like after extraction.
+	filler := strings.Repeat("a sentence that was really in the source. ", 24)
+	for i := 0; i < 9000; i++ {
+		id := fmt.Sprintf("node:n%05d", i)
+		big.Entities = append(big.Entities, alchemy.Entity{
+			ID: id, Type: "Node", Name: fmt.Sprintf("n%05d", i),
+			Attributes: map[string]any{"said": filler},
+			Provenance: prov,
+		})
+	}
+	h := newHarness(t, &fakeRunner{result: big})
+	jobID := uploadAndCreate(t, h)
+
+	code, body := h.do(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"`+jobID+`","load":"docs"}`)
+	if code != http.StatusOK {
+		t.Fatalf("a corpus over the one-message limit did not load: %d %s", code, truncate(body, 400))
+	}
+	var answer struct {
+		Report struct{ Entities int } `json:"report"`
+	}
+	if err := json.Unmarshal([]byte(body), &answer); err != nil {
+		t.Fatalf("answer: %v", err)
+	}
+	// Every record, not most of them: half a graph is the outcome this refuses.
+	if answer.Report.Entities != len(big.Entities) {
+		t.Errorf("loaded %d of %d entities", answer.Report.Entities, len(big.Entities))
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
 }

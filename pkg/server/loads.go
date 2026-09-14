@@ -15,8 +15,6 @@ import (
 
 	alchemycdb "github.com/liliang-cn/alchemy/connectors/cortexdb"
 	"github.com/liliang-cn/alchemy/pkg/sink"
-	"github.com/liliang-cn/alchemy/pkg/wire"
-	alchemyv1 "github.com/liliang-cn/alchemy/proto/alchemy/v1"
 	"github.com/liliang-cn/cortexdb/v2/pkg/authz"
 	"github.com/liliang-cn/cortexdb/v2/pkg/cortexdb"
 )
@@ -88,7 +86,11 @@ func (s *Server) handleLoads(w http.ResponseWriter, r *http.Request) {
 	// caller was authorized above, and GetResult is what decides whether a
 	// job is finished. A held job comes back as an error, not a graph.
 	ctx := withInternalToken(r.Context(), s.internal)
-	res, err := s.alchemy.GetResult(ctx, &alchemyv1.GetResultRequest{JobId: req.Job})
+	// By pages, always (pages.go). A small graph is one page, so this is not a
+	// second reader for the large case — it is the reader, and the refusals
+	// are the same ones GetResult made because both go through the pipeline's
+	// own finished() check.
+	result, err := s.resultOf(ctx, req.Job)
 	if err != nil {
 		st, _ := status.FromError(err)
 		switch st.Code() {
@@ -97,16 +99,14 @@ func (s *Server) handleLoads(w http.ResponseWriter, r *http.Request) {
 		case codes.FailedPrecondition:
 			// Held, or still running. The message names which.
 			httpError(w, http.StatusConflict, st.Message())
-		case codes.ResourceExhausted:
-			httpError(w, http.StatusRequestEntityTooLarge, st.Message()+" — StreamResult is not wired into loads yet")
 		default:
-			httpError(w, http.StatusBadGateway, st.Message())
+			httpError(w, http.StatusBadGateway, err.Error())
 		}
 		return
 	}
 
 	loader := alchemycdb.New(s.db, alchemycdb.Options{RunID: req.Load, Collection: req.Collection})
-	report, err := sink.Load(r.Context(), loader, wire.ResultFromProto(res), sink.Options{Load: req.Load, Replace: req.Replace})
+	report, err := sink.Load(r.Context(), loader, result, sink.Options{Load: req.Load, Replace: req.Replace})
 	if err != nil {
 		// The name already holds a different graph and Replace was not
 		// said: a refusal, not a failure, and the caller can say Replace.
