@@ -260,7 +260,7 @@ func (h *harness) useLivedb(f *livedbFake) *livedbFake {
 // signed plan and a run report.
 func livedbHarness(t *testing.T) (*harness, *livedbFake) {
 	t.Helper()
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	f := h.useLivedb(&livedbFake{
 		plan:   signedPlan(),
 		report: livedb.RunReport{ID: "run-9", Plan: "plan-1", RowsRead: 12, Chunks: 3},
@@ -653,7 +653,7 @@ func TestTheLivedbLedgerRecordsOnePlanEntryAndOneRunEntry(t *testing.T) {
 
 // A store that could not be built is a 503, and the server keeps serving.
 func TestALivedbRouteAnswers503WhenTheStoreIsUnavailable(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	h.srv.liveDB = func() (livedbStore, error) { return nil, errors.New("livedb: not implemented") }
 
 	for _, tc := range []struct{ method, path, body string }{

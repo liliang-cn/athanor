@@ -95,7 +95,7 @@ func cookieNamed(cookies []*http.Cookie, name string) *http.Cookie {
 
 // The whole point: one key, typed once, and the review queue opens.
 func TestOneSignInOpensTheFrontPageAndTheReviewUI(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	b := h.browser(t)
 
 	resp := h.signIn(t, b, "op-secret")
@@ -140,7 +140,7 @@ func TestOneSignInOpensTheFrontPageAndTheReviewUI(t *testing.T) {
 
 // A read-only key is a person too, and the review queue is a read.
 func TestAReadOnlyKeyAlsoOpensTheReviewUIFromOneSignIn(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	b := h.browser(t)
 	h.signIn(t, b, "ro-secret")
 	ui, _ := h.navigate(t, b, "/ui/")
@@ -151,7 +151,7 @@ func TestAReadOnlyKeyAlsoOpensTheReviewUIFromOneSignIn(t *testing.T) {
 
 // Signing out ends both, and the browser is left holding neither cookie.
 func TestSigningOutEndsBothSessions(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	b := h.browser(t)
 	h.signIn(t, b, "op-secret")
 
@@ -197,7 +197,7 @@ func TestSigningOutEndsBothSessions(t *testing.T) {
 
 // A key that is not in the policy leaves no trace at all.
 func TestAKeyThatIsNotInThePolicySetsNoCookieAndOpensNothing(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	b := h.browser(t)
 
 	resp := h.signIn(t, b, "not-a-key")
@@ -220,7 +220,7 @@ func TestAKeyThatIsNotInThePolicySetsNoCookieAndOpensNothing(t *testing.T) {
 
 // A cookie holding a key the policy does not name is no better than none.
 func TestAForgedCookieDoesNotOpenTheReviewUI(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	req, _ := http.NewRequest(http.MethodGet, "http://"+h.httpAddr+"/ui/", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: "not-a-key"})
 	resp, err := stopAtRedirect(&http.Client{}).Do(req)
@@ -236,7 +236,7 @@ func TestAForgedCookieDoesNotOpenTheReviewUI(t *testing.T) {
 // A browser with no session is sent to the one sign-in form there is; a
 // program is still refused with the 401 every route answers.
 func TestABrowserWithNoSessionIsSentToTheOneSignInForm(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 
 	resp, _ := h.navigate(t, h.browser(t), "/ui/")
 	if resp.StatusCode != http.StatusSeeOther {
@@ -261,7 +261,7 @@ func TestABrowserWithNoSessionIsSentToTheOneSignInForm(t *testing.T) {
 
 // The header still wins, so curl behaves at /ui/ exactly as it does at /v1.
 func TestABearerHeaderStillReachesTheReviewUIWithoutACookie(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	resp, err := h.http(http.MethodGet, "/ui/", "ro-secret", "")
 	if err != nil {
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func TestABearerHeaderStillReachesTheReviewUIWithoutACookie(t *testing.T) {
 // The cookie is carried, not trusted over a header the caller sent: a request
 // that names its own credential keeps it.
 func TestAnExplicitHeaderIsNotOverwrittenByTheCookie(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	req, _ := http.NewRequest(http.MethodGet, "http://"+h.httpAddr+"/ui/", nil)
 	req.Header.Set("Authorization", "Bearer not-a-key")
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: "op-secret"})
@@ -299,7 +299,7 @@ func TestAnExplicitHeaderIsNotOverwrittenByTheCookie(t *testing.T) {
 // reach of scripts — so there was no screen, and the nav pointed somewhere
 // else instead.
 func TestTheBrowserSessionReachesThePipelineToo(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	jobID := uploadAndCreate(t, h)
 
 	jar, err := cookiejar.New(nil)

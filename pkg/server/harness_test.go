@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,13 +32,28 @@ const keysJSON = `{"keys":[
 type fakeRunner struct {
 	result alchemy.Result
 	err    error
+	// next, when set, is what the second and later jobs extract. It exists so
+	// a test can reload a corpus that actually changed: a second job returning
+	// the first one's graph has the same digest, so the load converges and
+	// deletes nothing, and a test written over it proves nothing about what a
+	// real correction does.
+	next  *alchemy.Result
+	runs  int
+	runMu sync.Mutex
 }
 
-func (f fakeRunner) Run(_ context.Context, jobID string, _ service.JobSpec, _ chan<- service.Event, _ service.Inbox) (alchemy.Result, error) {
+func (f *fakeRunner) Run(_ context.Context, jobID string, _ service.JobSpec, _ chan<- service.Event, _ service.Inbox) (alchemy.Result, error) {
 	if f.err != nil {
 		return alchemy.Result{}, f.err
 	}
+	f.runMu.Lock()
+	f.runs++
+	first := f.runs == 1
+	f.runMu.Unlock()
 	r := f.result
+	if !first && f.next != nil {
+		r = *f.next
+	}
 	r.Job = jobID
 	return r, nil
 }

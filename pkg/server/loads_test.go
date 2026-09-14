@@ -78,7 +78,7 @@ func uploadAndCreate(t *testing.T, h *harness) string {
 }
 
 func TestAFinishedJobLoadsIntoTheBrainWithItsGrades(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	jobID := uploadAndCreate(t, h)
 
 	resp, err := h.http(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"`+jobID+`"}`)
@@ -112,7 +112,7 @@ func TestAFinishedJobLoadsIntoTheBrainWithItsGrades(t *testing.T) {
 }
 
 func TestAReadOnlyKeyCannotLoadAndNoKeyCannotEither(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	jobID := uploadAndCreate(t, h)
 
 	resp, _ := h.http(http.MethodPost, "/athanor/loads", "ro-secret", `{"job":"`+jobID+`"}`)
@@ -136,7 +136,7 @@ func TestAHeldJobCannotBeLoadedUntilSomeoneAnswers(t *testing.T) {
 		Kind: alchemy.ConflictCardinality, Subject: "drbdresource:sds-meta",
 		Detail: "two nodes claim to promote it",
 	}}
-	h := newHarness(t, fakeRunner{result: held})
+	h := newHarness(t, &fakeRunner{result: held})
 	jobID := uploadAndCreate(t, h)
 
 	resp, _ := h.http(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"`+jobID+`"}`)
@@ -155,7 +155,7 @@ func TestAHeldJobCannotBeLoadedUntilSomeoneAnswers(t *testing.T) {
 }
 
 func TestAnUnknownJobIsNotFoundAndATypoInTheBodyIsRefused(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	resp, _ := h.http(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"never"}`)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {

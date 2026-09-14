@@ -57,7 +57,7 @@ func rulePath(id, verb string) string {
 // is what every rule below has to have something to fire over.
 func chained(t *testing.T) *harness {
 	t.Helper()
-	h := newHarness(t, fakeRunner{result: chainResult()})
+	h := newHarness(t, &fakeRunner{result: chainResult()})
 	jobID := uploadAndCreate(t, h)
 	if code, body := h.do(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"`+jobID+`","load":"orgchart"}`); code != http.StatusOK {
 		t.Fatalf("load: %d %s", code, body)
@@ -391,4 +391,107 @@ func TestAConfinedKeySeesOnlyItsOwnFirings(t *testing.T) {
 	if code != http.StatusNotFound || missing != code || absent != body {
 		t.Fatalf("forbidden and missing answer differently:\n forbidden %d %s\n missing   %d %s", code, body, missing, absent)
 	}
+}
+
+// Reloading a corpus used to take every derived fact with it, silently.
+//
+// A rule's conclusions are edges between the entities its premises joined, and
+// those entities belong to a load. Replace the load — the ordinary way to
+// correct a corpus — and the entities go, and the derived edges on them go
+// too. sink.Load counts what it wrote and cannot see what a rule had added on
+// top, so the load reported success and the brain came back knowing less than
+// it had, with nothing anywhere saying so.
+//
+// It happened twice in one afternoon on a real graph, and both times the lost
+// facts were the ones hardest to miss by eye: two officers whose employment no
+// document stated in prose, and eight people whose city came from their team's.
+func TestALoadPutsBackWhatItsPredecessorsRulesHadDerived(t *testing.T) {
+	ctx := context.Background()
+	// A corrected corpus, not the same one again: the same graph twice has the
+	// same digest, so the load converges and deletes nothing, and a test over
+	// that would prove nothing about what a real correction does. This second
+	// extraction says the same two things and one more.
+	corrected := chainResult()
+	prov := corrected.Entities[0].Provenance
+	corrected.Entities = append(corrected.Entities,
+		alchemy.Entity{ID: "person:di", Type: "Node", Name: "di", Provenance: prov})
+	corrected.Relations = append(corrected.Relations,
+		alchemy.Relation{From: "person:cy", To: "person:di", Type: "manages", Provenance: prov})
+
+	h := newHarness(t, &fakeRunner{result: chainResult(), next: &corrected})
+	jobID := uploadAndCreate(t, h)
+	if code, body := h.do(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"`+jobID+`","load":"orgchart"}`); code != http.StatusOK {
+		t.Fatalf("load: %d %s", code, body)
+	}
+
+	if code, body := h.do(http.MethodPost, "/athanor/rules", "op-secret", chainRule); code != http.StatusCreated {
+		t.Fatalf("declare: %d %s", code, body)
+	}
+	if code, body := h.do(http.MethodPost, rulePath("chain@1", "publish"), "op-secret", `{"by":"liliang"}`); code != http.StatusOK {
+		t.Fatalf("publish: %d %s", code, body)
+	}
+	if code, body := h.do(http.MethodPost, rulePath("chain@1", "apply"), "op-secret", `{"by":"liliang"}`); code != http.StatusOK {
+		t.Fatalf("apply: %d %s", code, body)
+	}
+	before := derivedEdges(t, h)
+	if before == 0 {
+		t.Fatal("the rule derived nothing, so this test would pass for the wrong reason")
+	}
+
+	// The ordinary correction: the corrected corpus, over the old one.
+	jobID = uploadAndCreate(t, h)
+	code, body := h.do(http.MethodPost, "/athanor/loads", "op-secret",
+		`{"job":"`+jobID+`","load":"orgchart","replace":true}`)
+	if code != http.StatusOK {
+		t.Fatalf("reload: %d %s", code, body)
+	}
+
+	// The answer says what it put back, so that a caller reading it knows the
+	// derived half of the graph is there without going and counting.
+	var answer struct {
+		Derived    int    `json:"derived"`
+		RulesError string `json:"rules_error"`
+		Rules      []struct {
+			Rule    string `json:"rule"`
+			Derived int    `json:"derived"`
+			Act     string `json:"act"`
+			Error   string `json:"error"`
+		} `json:"rules"`
+	}
+	if err := json.Unmarshal([]byte(body), &answer); err != nil {
+		t.Fatalf("answer: %v (%s)", err, body)
+	}
+	if answer.RulesError != "" {
+		t.Errorf("a rule in force did not fire after the load: %s", answer.RulesError)
+	}
+	if len(answer.Rules) != 1 || answer.Rules[0].Rule != "chain@1" || answer.Rules[0].Act == "" {
+		t.Errorf("the load does not report re-firing the rule in force: %s", body)
+	}
+	// The corrected corpus has one more link in the chain, so the rule has
+	// more to derive than it did — which is the point of re-firing rather than
+	// of restoring what was deleted. What must never happen is fewer.
+	if answer.Derived < before {
+		t.Errorf("the load put back %d derived edges and the rule had produced %d before it", answer.Derived, before)
+	}
+
+	// And the brain really holds them.
+	if got := derivedEdges(t, h); got != answer.Derived {
+		t.Errorf("the load reported %d derived edges and the brain holds %d", answer.Derived, got)
+	} else if got < before {
+		t.Errorf("after the reload the brain holds %d derived edges, and held %d before it", got, before)
+	}
+	if _, err := h.srv.db.ContractTally(ctx); err != nil {
+		t.Fatalf("tally: %v", err)
+	}
+}
+
+// derivedEdges counts the edges that no document stated: the self_consistent
+// half of the contract, which is exactly what a rule produces.
+func derivedEdges(t *testing.T, h *harness) int {
+	t.Helper()
+	tally, err := h.srv.db.ContractTally(context.Background())
+	if err != nil {
+		t.Fatalf("tally: %v", err)
+	}
+	return tally.SelfConsistent.Edges
 }

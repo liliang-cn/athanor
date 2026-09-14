@@ -104,7 +104,7 @@ func aLoadedFact(t *testing.T, h *harness) string {
 }
 
 func TestAMomentIsTakenNamedAndMirroredIntoTheLedger(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	jobID := uploadAndCreate(t, h)
 
 	// A vocabulary in force and a load that landed: the two things a snapshot
@@ -165,7 +165,7 @@ func TestAMomentIsTakenNamedAndMirroredIntoTheLedger(t *testing.T) {
 }
 
 func TestAMomentNobodyIsNamedForIsRefusedAtTheDoor(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 
 	for _, body := range []string{
 		`{"name":"nameless"}`,
@@ -193,7 +193,7 @@ func TestAMomentNobodyIsNamedForIsRefusedAtTheDoor(t *testing.T) {
 }
 
 func TestAReaderMayReadEveryMomentAndTakeNone(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	if code, body := h.do(http.MethodPost, "/athanor/snapshots", "op-secret", `{"name":"one","by":"liliang"}`); code != http.StatusCreated {
 		t.Fatalf("take: %d %s", code, body)
 	}
@@ -226,7 +226,7 @@ func TestAReaderMayReadEveryMomentAndTakeNone(t *testing.T) {
 }
 
 func TestRetakingANameUpdatesOneLedgerEntry(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 
 	first := decodeSnapshot(t, h.take(t, "nightly", "op-secret", `{"name":"nightly","by":"liliang"}`))
 	// Without `replace` a name is one moment, so the second take is refused
@@ -252,7 +252,7 @@ func TestRetakingANameUpdatesOneLedgerEntry(t *testing.T) {
 }
 
 func TestDroppingRetiresTheNameAndKeepsTheRecord(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	taken := decodeSnapshot(t, h.take(t, "scratch", "op-secret", `{"name":"scratch","by":"liliang"}`))
 
 	code, body := h.do(http.MethodPost, snapshotPath("scratch", "drop"), "op-secret", `{"by":"liliang","note":"taken by mistake"}`)
@@ -295,7 +295,7 @@ func TestDroppingRetiresTheNameAndKeepsTheRecord(t *testing.T) {
 }
 
 func TestADiffSaysWhatFellOffTheLadder(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	jobID := uploadAndCreate(t, h)
 	if code, body := h.do(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"`+jobID+`"}`); code != http.StatusOK {
 		t.Fatalf("load: %d %s", code, body)
@@ -363,7 +363,7 @@ func TestADiffSaysWhatFellOffTheLadder(t *testing.T) {
 }
 
 func TestASnapshotSurvivesALedgerWriteThatFails(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	h.srv.ledger = brokenLedger{}
 
 	code, body := h.do(http.MethodPost, "/athanor/snapshots", "op-secret", `{"name":"march","by":"liliang"}`)

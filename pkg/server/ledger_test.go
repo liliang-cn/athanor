@@ -51,7 +51,7 @@ func (h *harness) decisions(t *testing.T, query, bearer string) decisionsRespons
 }
 
 func TestALoadRecordsItselfInTheLedger(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	jobID := uploadAndCreate(t, h)
 
 	before, err := h.srv.db.ContractTally(context.Background())
@@ -122,7 +122,7 @@ func TestALoadRecordsItselfInTheLedger(t *testing.T) {
 }
 
 func TestALoadSurvivesALedgerWriteThatFails(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	jobID := uploadAndCreate(t, h)
 	h.srv.ledger = brokenLedger{}
 
@@ -192,7 +192,7 @@ func TestADecideRecordsAReviewDecisionUnderTheKeyId(t *testing.T) {
 }
 
 func TestAnOntologyApproveReachesTheLedger(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: proposingResult()})
+	h := newHarness(t, &fakeRunner{result: proposingResult()})
 	jobID := uploadAndCreate(t, h)
 
 	if code, body := h.do(http.MethodPost, "/athanor/ontologies", "op-secret", ontologyDoc); code != http.StatusCreated {
@@ -233,7 +233,7 @@ func TestAnOntologyApproveReachesTheLedger(t *testing.T) {
 }
 
 func TestPrecedentsByKindAreNewestFirst(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	first := uploadAndCreate(t, h)
 	if code, body := h.do(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"`+first+`","load":"one"}`); code != http.StatusOK {
 		t.Fatalf("first load: %d %s", code, body)
@@ -256,7 +256,7 @@ func TestPrecedentsByKindAreNewestFirst(t *testing.T) {
 }
 
 func TestAReadOnlyKeyReadsTheLedgerAndCannotWriteToIt(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	jobID := uploadAndCreate(t, h)
 	if code, body := h.do(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"`+jobID+`"}`); code != http.StatusOK {
 		t.Fatalf("load: %d %s", code, body)
@@ -297,7 +297,7 @@ func newConfinedHarness(t *testing.T) *harness {
 	if err := os.WriteFile(keyFile, []byte(confinedKeysJSON), 0o600); err != nil {
 		t.Fatalf("keys: %v", err)
 	}
-	return newHarnessWith(t, fakeRunner{result: cannedResult()}, keyFile, dir)
+	return newHarnessWith(t, &fakeRunner{result: cannedResult()}, keyFile, dir)
 }
 
 func TestAConfinedKeySeesOnlyItsOwnLedgerEntries(t *testing.T) {
@@ -344,7 +344,7 @@ func TestAConfinedKeySeesOnlyItsOwnLedgerEntries(t *testing.T) {
 }
 
 func TestTheChainRouteAnswersTheDecisionAndItsPremises(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	jobID := uploadAndCreate(t, h)
 	resp, err := h.http(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"`+jobID+`"}`)
 	if err != nil {
@@ -373,7 +373,7 @@ func TestTheChainRouteAnswersTheDecisionAndItsPremises(t *testing.T) {
 }
 
 func TestTheFrontPageShowsTheLedger(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	jobID := uploadAndCreate(t, h)
 	if code, body := h.do(http.MethodPost, "/athanor/loads", "op-secret", `{"job":"`+jobID+`","load":"march"}`); code != http.StatusOK {
 		t.Fatalf("load: %d %s", code, body)
@@ -415,7 +415,7 @@ func heldHarness(t *testing.T) (*harness, string, *alchemyv1.ReviewItem) {
 		Kind: alchemy.ConflictCardinality, Subject: "drbdresource:sds-meta",
 		Detail: "two nodes claim to promote it",
 	}}
-	h := newHarness(t, fakeRunner{result: held})
+	h := newHarness(t, &fakeRunner{result: held})
 	jobID := uploadAndCreate(t, h)
 	findings, err := alchemyv1.NewAlchemyClient(h.conn).ListFindings(asKey("op-secret"),
 		&alchemyv1.ListFindingsRequest{JobId: jobID})

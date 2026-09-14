@@ -19,7 +19,7 @@ import (
 // with a 401 that said "missing bearer token". The fix was one function; this
 // test is what stops the next handler from reading the header again.
 func TestEveryJSONRouteAcceptsTheSessionCookie(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	for _, path := range []string{
 		"/api/session",
 		"/api/shelf",
@@ -49,7 +49,7 @@ func TestEveryJSONRouteAcceptsTheSessionCookie(t *testing.T) {
 // A bearer header still works and still wins, so a program behaves the same
 // whatever a browser happened to leave in the jar.
 func TestABearerHeaderOutranksTheCookie(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	req, err := http.NewRequest(http.MethodGet, "http://"+h.httpAddr+"/api/session", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestABearerHeaderOutranksTheCookie(t *testing.T) {
 
 // The secret goes in and does not come back out.
 func TestTheSessionNeverReturnsTheKey(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	body := strings.NewReader(`{"key":` + strconv.Quote("op-secret") + `}`)
 	req, err := http.NewRequest(http.MethodPost, "http://"+h.httpAddr+"/api/session", body)
 	if err != nil {
@@ -99,7 +99,7 @@ func TestTheSessionNeverReturnsTheKey(t *testing.T) {
 // A key nobody issued is refused in the same words as a malformed one, so the
 // endpoint is not an oracle for which ids exist.
 func TestAnUnknownKeyIsRefusedIndistinguishably(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	seen := map[string]int{}
 	for _, key := range []string{"not-a-key", "", "op-secre"} {
 		body := strings.NewReader(`{"key":` + strconv.Quote(key) + `}`)

@@ -22,7 +22,7 @@ import (
 // one of its records, and check that the correction is in the brain and the
 // record it retires is marked as retired rather than deleted.
 func TestAnAssertionReachesTheBrainAndRetiresWhatItNames(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	ctx := context.Background()
 	jobID := uploadAndCreate(t, h)
 	if resp, err := h.http(http.MethodPost, "/athanor/loads", "op-secret",
@@ -110,7 +110,7 @@ func TestAnAssertionReachesTheBrainAndRetiresWhatItNames(t *testing.T) {
 // swallowed. The assertion still lands; what must not happen is a 200 that
 // leaves somebody believing the old answer was marked.
 func TestAnAssertionSaysWhenTheRecordItRetiresIsNotThere(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	body := `{
 	  "by": "liliang",
 	  "entities": [{"id": "node:hp3", "type": "Node", "name": "hp3"}],
@@ -142,7 +142,7 @@ func TestAnAssertionSaysWhenTheRecordItRetiresIsNotThere(t *testing.T) {
 
 // An assertion nobody signed is refused before the pipeline is called at all.
 func TestAnUnsignedAssertionIsRefused(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	resp, err := h.http(http.MethodPost, "/athanor/assertions", "op-secret",
 		`{"entities":[{"id":"node:x","type":"Node","name":"x"}]}`)
 	if err != nil {

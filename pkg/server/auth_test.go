@@ -12,7 +12,7 @@ import (
 )
 
 func TestAReadOnlyKeyMayLookAtThePipelineButNotChangeIt(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	c := alchemyv1.NewAlchemyClient(h.conn)
 
 	_, err := c.CreateJob(asKey("ro-secret"), &alchemyv1.CreateJobRequest{})
@@ -29,7 +29,7 @@ func TestAReadOnlyKeyMayLookAtThePipelineButNotChangeIt(t *testing.T) {
 }
 
 func TestNoKeyIsRefusedBeforeReachingEitherService(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	if _, err := alchemyv1.NewAlchemyClient(h.conn).GetJob(context.Background(), &alchemyv1.GetJobRequest{JobId: "x"}); status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("pipeline without a key: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestTheBrainKeepsItsOwnPolicyOnTheSharedListener(t *testing.T) {
 	// cortexdb.v1 calls go to CortexDB's interceptor unchanged. A read-only key
 	// is refused a write there by CortexDB's rule, with CortexDB's wording —
 	// proof the call was routed, not re-implemented.
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	m := rpcv1.NewMemoryServiceClient(h.conn)
 	_, err := m.SaveMemory(asKey("ro-secret"), &rpcv1.SaveMemoryRequest{MemoryId: "m1", UserId: "u", Scope: "user", Content: "x"})
 	if status.Code(err) != codes.PermissionDenied {
@@ -59,7 +59,7 @@ func TestTheBrainKeepsItsOwnPolicyOnTheSharedListener(t *testing.T) {
 func TestTheCallerNeverLearnsTheInternalToken(t *testing.T) {
 	// alchemy is shown a token minted at startup. It is not any key in the
 	// policy, so presenting it from outside is presenting an unknown key.
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	_, err := alchemyv1.NewAlchemyClient(h.conn).GetJob(asKey(h.srv.internal), &alchemyv1.GetJobRequest{JobId: "x"})
 	if status.Code(err) != codes.Unauthenticated {
 		t.Fatalf("the internal token worked from outside: %v", err)
@@ -67,7 +67,7 @@ func TestTheCallerNeverLearnsTheInternalToken(t *testing.T) {
 }
 
 func TestAStreamThatIsNotThePipelinesIsRefused(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	// WatchJob is a pipeline stream and a read: a reader may open it and gets
 	// alchemy's own answer about a job that does not exist.
 	stream, err := alchemyv1.NewAlchemyClient(h.conn).WatchJob(asKey("ro-secret"), &alchemyv1.WatchJobRequest{JobId: "never"})
@@ -85,7 +85,7 @@ func TestAStreamThatIsNotThePipelinesIsRefused(t *testing.T) {
 // Read in the first version of the table; this test is what makes that a
 // decision rather than an oversight that can come back.
 func TestAReadOnlyKeyCannotDecideOverTheReviewStream(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	stream, err := alchemyv1.NewAlchemyClient(h.conn).Review(asKey("ro-secret"))
 	if err != nil {
 		t.Fatalf("open stream: %v", err)

@@ -75,7 +75,7 @@ func path(id, verb string) string {
 }
 
 func TestAVocabularyIsDraftedProposedApprovedAndPublished(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: proposingResult()})
+	h := newHarness(t, &fakeRunner{result: proposingResult()})
 	jobID := uploadAndCreate(t, h)
 
 	// 1. a draft: the document, validated by alchemy's own loader.
@@ -187,7 +187,7 @@ func TestAHeldJobCannotBeProposedFrom(t *testing.T) {
 		Kind: alchemy.ConflictCardinality, Subject: "drbdresource:sds-meta",
 		Detail: "two nodes claim to promote it",
 	}}
-	h := newHarness(t, fakeRunner{result: held})
+	h := newHarness(t, &fakeRunner{result: held})
 	jobID := uploadAndCreate(t, h)
 
 	if code, body := h.do(http.MethodPost, "/athanor/ontologies", "op-secret", ontologyDoc); code != http.StatusCreated {
@@ -213,7 +213,7 @@ func TestAHeldJobCannotBeProposedFrom(t *testing.T) {
 }
 
 func TestAnApprovalNobodyIsNamedForIsRefused(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: proposingResult()})
+	h := newHarness(t, &fakeRunner{result: proposingResult()})
 	jobID := uploadAndCreate(t, h)
 
 	if code, body := h.do(http.MethodPost, "/athanor/ontologies", "op-secret", ontologyDoc); code != http.StatusCreated {
@@ -241,7 +241,7 @@ func TestAnApprovalNobodyIsNamedForIsRefused(t *testing.T) {
 }
 
 func TestAReaderMayLookAtEveryVocabularyAndChangeNone(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: proposingResult()})
+	h := newHarness(t, &fakeRunner{result: proposingResult()})
 	jobID := uploadAndCreate(t, h)
 
 	if code, body := h.do(http.MethodPost, "/athanor/ontologies", "op-secret", ontologyDoc); code != http.StatusCreated {
@@ -284,7 +284,7 @@ func TestAReaderMayLookAtEveryVocabularyAndChangeNone(t *testing.T) {
 }
 
 func TestTwoLineagesArePublishedIndependently(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: proposingResult()})
+	h := newHarness(t, &fakeRunner{result: proposingResult()})
 	const codeDoc = `{"id":"code@1","parts":{"code":{"entities":[{"name":"File"}]}}}`
 	const codeTwo = `{"id":"code@2","parts":{"code":{"entities":[{"name":"File"},{"name":"Package"}]}}}`
 

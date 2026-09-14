@@ -6,7 +6,7 @@ import (
 )
 
 func TestTheGraphAndTheMetricsAreBehindTheSameDoorAsEverythingElse(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	for _, path := range []string{"/graph/", "/graph/api/graph", "/metrics", "/debug/vars"} {
 		resp, err := h.http(http.MethodGet, path, "", "")
 		if err != nil {
@@ -25,7 +25,7 @@ func TestTheGraphAndTheMetricsAreBehindTheSameDoorAsEverythingElse(t *testing.T)
 }
 
 func TestTheSignInCookieOpensTheGraphForABrowser(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	req, _ := http.NewRequest(http.MethodGet, "http://"+h.httpAddr+"/graph/api/graph", nil)
 	req.AddCookie(&http.Cookie{Name: cookieName, Value: "ro-secret"})
 	resp, err := http.DefaultClient.Do(req)
@@ -46,7 +46,7 @@ func TestTheSignInCookieOpensTheGraphForABrowser(t *testing.T) {
 }
 
 func TestHealthzStaysOpenAndSaysNothing(t *testing.T) {
-	h := newHarness(t, fakeRunner{})
+	h := newHarness(t, &fakeRunner{})
 	resp, _ := h.http(http.MethodGet, "/healthz", "", "")
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

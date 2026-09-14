@@ -480,7 +480,7 @@ func followServer(t *testing.T, f *livedbFake) (httpAddr string, stop func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	srv, err := New(ctx, Options{
 		DBPath: filepath.Join(dir, "brain.db"), GRPCAddr: "127.0.0.1:0", HTTPAddr: "127.0.0.1:0",
-		KeyFile: keyFile, Spool: dir, Runner: fakeRunner{result: cannedResult()},
+		KeyFile: keyFile, Spool: dir, Runner: &fakeRunner{result: cannedResult()},
 	})
 	if err != nil {
 		cancel()

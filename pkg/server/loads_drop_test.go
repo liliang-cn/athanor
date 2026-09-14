@@ -32,7 +32,7 @@ func loadJobAs(t *testing.T, h *harness, name string) {
 }
 
 func TestTheCatalogueNamesWhatTheBrainHolds(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	loadJobAs(t, h, "first")
 	loadJobAs(t, h, "second")
 
@@ -66,7 +66,7 @@ func TestTheCatalogueNamesWhatTheBrainHolds(t *testing.T) {
 }
 
 func TestDroppingALoadIsSignedAndRecorded(t *testing.T) {
-	h := newHarness(t, fakeRunner{result: cannedResult()})
+	h := newHarness(t, &fakeRunner{result: cannedResult()})
 	loadJobAs(t, h, "wrong")
 
 	before, err := h.srv.db.ContractTally(context.Background())

@@ -123,11 +123,23 @@ func (s *Server) handleLoads(w http.ResponseWriter, r *http.Request) {
 	// and logged, and the status stays 200. Rolling back a load because its
 	// audit entry did not write would be a store that loses data to protect a
 	// note about the data.
+	// The rules that are in force drew edges on the entities this load just
+	// replaced, and those went with them. Putting them back is part of
+	// loading, not a thing to remember afterwards (refire.go).
+	fired := s.refirePublished(r.Context(), key.ID, "load "+req.Load)
+
 	answer := map[string]any{
 		"job":    req.Job,
 		"load":   req.Load,
 		"by":     key.ID,
 		"report": report,
+	}
+	if len(fired) > 0 {
+		answer["rules"] = fired
+		answer["derived"] = derivedCount(fired)
+		if msg := refireErrors(fired); msg != "" {
+			answer["rules_error"] = msg
+		}
 	}
 	if decision, err := s.recordLoad(r.Context(), key.ID, req, report); err != nil {
 		log.Printf("athanor: ledger: load %s of job %s: %v", req.Load, req.Job, err)

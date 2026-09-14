@@ -7,8 +7,8 @@ go 1.25.0
 
 require (
 	github.com/joho/godotenv v1.5.1
-	github.com/liliang-cn/alchemy v0.7.2
-	github.com/liliang-cn/alchemy/connectors v0.7.2
+	github.com/liliang-cn/alchemy v0.7.3
+	github.com/liliang-cn/alchemy/connectors v0.7.3
 	github.com/liliang-cn/cortexdb/v2 v2.110.0
 	google.golang.org/grpc v1.83.2
 	google.golang.org/protobuf v1.36.12
