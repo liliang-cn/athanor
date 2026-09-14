@@ -52,7 +52,7 @@ func New(db *cortexdb.DB, opts ...Option) (*Store, error) {
 		db:       db.SQL(),
 		dialect:  db.Dialect(),
 		opener:   liveOpener{},
-		importer: importflow.New(db),
+		importer: liveImporter{db: db},
 		now:      func() time.Time { return time.Now().UTC() },
 	}}
 	for _, opt := range opts {
@@ -351,4 +351,14 @@ func (c checkpointStore) Save(ctx context.Context, sourceKey string, cp connecto
 		return fmt.Errorf("livedb: save checkpoint %s: %w", sourceKey, err)
 	}
 	return nil
+}
+
+// liveImporter is the real engine, built per run so the provenance stamped on
+// everything it writes can name that run. importflow.New is cheap — it holds a
+// database handle and four options — and a shared engine would have to carry
+// one run's identity into the next.
+type liveImporter struct{ db *cortexdb.DB }
+
+func (l liveImporter) Run(ctx context.Context, src importflow.Source, plan importflow.MappingPlan, provenance map[string]string) (*importflow.Report, error) {
+	return importflow.New(l.db, importflow.WithProvenance(provenance)).Run(ctx, src, plan)
 }

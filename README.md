@@ -2,13 +2,16 @@
 
 CortexDB's brain and alchemy's pipeline behind one door: files go in under a
 vocabulary, a disagreement stops the job, a person answers it, and the answer
-survives into a store that can still say how it knows.
+survives into a store that can still say how it knows. A database somebody else
+runs goes in the same way, after somebody signs for which columns may leave the
+building.
 
-Every record in the brain carries which file, which chunk and which producer
-it came from, whether a source stated it or a model inferred it, and a grade:
-`verified` when a named person kept it, `refused` when the vocabulary declined
-it, `asserted` when a model said so and nobody checked. Ask the store what its
-shelf stands on and it answers with numbers, including the ones that are bad.
+Every record in the brain carries where it came from — which file and chunk, or
+which signed plan and run — and which producer made it, whether a source stated
+it or a model inferred it, and a grade: `verified` when a named person kept it,
+`refused` when the vocabulary declined it, `asserted` when something said so and
+nobody checked. Ask the store what its shelf stands on and it answers with
+numbers, including the ones that are bad.
 
 It runs inside your network. Models are endpoints you supply per job; nothing
 here hardcodes a host, a key or a vendor.
@@ -188,6 +191,62 @@ two apart. The pipeline itself is still unconfined: a job could be owned, but a
 source id could not without alchemy's spool carrying an owner, and a
 confinement with a hole in it reads as a guarantee.
 
+## A database somebody else runs
+
+A file is not the only thing an engagement has. The other thing is a production
+database nobody is going to hand over — and reading one is not an import, it is
+a decision: which tables, which columns, what gets masked before it leaves the
+building, and whose name is on that. So it is a workflow, not a flag.
+
+```sh
+# 1. propose — reads the schema, classifies every column, drafts the treatment
+curl -H "$K" -d '{"source":{"driver":"postgres","dsn":"postgres://ro:***@db.internal:5432/crm","schema":"public"}}' \
+  http://127.0.0.1:47832/athanor/livedb/plans
+# 2. read it, change what is wrong
+curl -H "$K" -X PATCH -d '{"changes":[{"table":"customers","column":"city","action":"keep"}],"by":"liliang"}' \
+  http://127.0.0.1:47832/athanor/livedb/plans/<id>
+# 3. sign the hash you actually read
+curl -H "$K" -d '{"hash":"<the hash the plan came back with>","by":"liliang"}' \
+  http://127.0.0.1:47832/athanor/livedb/plans/<id>/signature
+# 4. run it — dry first; the credential is supplied again and never stored
+curl -H "$K" -d '{"plan":"<id>","dsn":"...","dry_run":true}' \
+  http://127.0.0.1:47832/athanor/livedb/runs
+# 5. keep up with it afterwards
+curl -H "$K" -d '{"plan":"<id>","dsn":"..."}' http://127.0.0.1:47832/athanor/livedb/follows
+```
+
+The signature is over a hash of the plan, so signing something you did not read
+is not a thing that can happen quietly: amend it and the hash moves, and the
+old signature is refused by name. The credential is never kept — the plan holds
+the redacted form — and it is supplied again at run time and checked against the
+source the plan was signed for, so a plan signed over staging cannot be pointed
+at production by pasting a different DSN. `ATHANOR_LIVEDB_HOSTS` is the blunt
+second control: the hosts this Athanor will dial at all.
+
+What a run writes arrives graded like everything else: `asserted`, because a
+system of record said so and nobody checked it — the ladder measures whether
+anybody checked, not how trustworthy a producer feels — with `_producer:
+tabular`, `_source` naming the **plan** and never the DSN, `_by` the operator
+and `_run` the run whose report says how many rows were read and what drifted.
+Ask such a fact where it came from and the answer walks back through the run to
+the signature to a person.
+
+Masked values leave the building as tokens. Resolving one is its own permission
+(`athanor.livedb.unmask`), separate from the permission to build the graph,
+requires a written reason, and is a ledger entry whether or not it found
+anything — including the reason, the caller and the count, never the value.
+
+Three things it does not do:
+
+- **A follow is at-least-once, not exactly-once.** It reports what it has seen
+  and where it is; it does not promise a row is applied once.
+- **Only what the publication carries.** A follow over a Postgres change stream
+  refuses to start against a publication that would carry none of the tables the
+  plan names, rather than reporting "running" over a database it cannot see.
+- **The graph is not confined per row.** A restricted key cannot propose, sign
+  or run, but the facts a run wrote are readable by anything that can read the
+  brain.
+
 ## Time travel
 
 CortexDB's graph has been bitemporal since v2.100.0: every node and edge
@@ -252,6 +311,7 @@ Four things it does not do, said here rather than discovered:
 | `pkg/server` | the assembly: one policy over two services, and the load |
 | `pkg/ontologies` | vocabulary versions and the signed acts on them |
 | `pkg/rules` | declared rules, who put them in force, and every firing |
+| `pkg/livedb` | plans over a live database, the signature, the run, the follow |
 | `pkg/snapshots` | named moments, and the diff between two of them |
 | `deploy/` | systemd, Docker, compose, example key file |
 | `docs/superpowers/specs/` | the design, and why the two decisions were made |

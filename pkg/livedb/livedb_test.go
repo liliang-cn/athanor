@@ -15,6 +15,7 @@ import (
 
 	"github.com/liliang-cn/athanor/internal/braintest"
 	"github.com/liliang-cn/cortexdb/v2/pkg/connector"
+	"github.com/liliang-cn/cortexdb/v2/pkg/cortexdb"
 	"github.com/liliang-cn/cortexdb/v2/pkg/importflow"
 )
 
@@ -104,12 +105,14 @@ func (f *fakeOpener) Changes(context.Context, Source, connector.Checkpoint) (con
 type fakeImporter struct {
 	plans []importflow.MappingPlan
 	got   []importflow.Record
+	stamp []map[string]string
 	runs  int
 }
 
-func (f *fakeImporter) Run(ctx context.Context, src importflow.Source, plan importflow.MappingPlan) (*importflow.Report, error) {
+func (f *fakeImporter) Run(ctx context.Context, src importflow.Source, plan importflow.MappingPlan, provenance map[string]string) (*importflow.Report, error) {
 	f.runs++
 	f.plans = append(f.plans, plan)
+	f.stamp = append(f.stamp, provenance)
 	rep := &importflow.Report{}
 	err := src.Records(ctx, func(r importflow.Record) error {
 		f.got = append(f.got, r)
@@ -1329,4 +1332,69 @@ func TestAFollowRefusesAPublicationThatWouldCarryNothing(t *testing.T) {
 	if !strings.Contains(err.Error(), "customers") || !strings.Contains(err.Error(), "ALTER PUBLICATION") {
 		t.Errorf("the refusal names neither the missing table nor the statement that adds it: %v", err)
 	}
+}
+
+// TestAnImportedRowSaysWhereItCameFrom is the gap that made the live-database
+// door the one door whose output was anonymous.
+//
+// Everything a run wrote landed in the brain carrying nothing: the plan that
+// was signed to read the table, the run that read it and the operator who
+// authorized it were recorded in the ledger and on none of the facts.
+// contract_tally counted them as untagged and there was no way to find out what
+// they were; asking one of them how it was known had no answer at all.
+func TestAnImportedRowSaysWhereItCameFrom(t *testing.T) {
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		signed := h.sign(t, h.propose(t))
+
+		rep, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: h.dsn}, "liliang")
+		if err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		if len(h.importer.stamp) != 1 {
+			t.Fatalf("the importer was handed provenance %d times", len(h.importer.stamp))
+		}
+		got := h.importer.stamp[0]
+
+		for key, want := range map[string]string{
+			cortexdb.KeySource:              "athanor:livedb:" + signed.ID,
+			cortexdb.KeyProducer:            cortexdb.ProducerTabular,
+			cortexdb.KeyGrade:               cortexdb.GradeAsserted,
+			cortexdb.KeyBy:                  "liliang",
+			cortexdb.ContractPrefix + "run": rep.ID,
+			cortexdb.KeyChunk:               "-1",
+		} {
+			if got[key] != want {
+				t.Errorf("%s = %q, want %q", key, got[key], want)
+			}
+		}
+		if _, err := time.Parse(time.RFC3339, got[cortexdb.KeyAt]); err != nil {
+			t.Errorf("%s = %q, which is not RFC 3339: %v", cortexdb.KeyAt, got[cortexdb.KeyAt], err)
+		}
+	})
+}
+
+// TestTheProvenanceOfARunNeverCarriesACredential is the one thing that must not
+// leak through this field. A source string is read by everyone who can read the
+// record, the plan id already resolves to the database, the tables, the
+// desensitization and the signature — and the DSN the run was handed contains a
+// password.
+func TestTheProvenanceOfARunNeverCarriesACredential(t *testing.T) {
+	eachBrain(t, func(t *testing.T, b braintest.Brain) {
+		ctx := context.Background()
+		h := newHarness(t, b)
+		signed := h.sign(t, h.propose(t))
+
+		if _, err := h.store.Run(ctx, RunRequest{Plan: signed.ID, DSN: h.dsn}, "liliang"); err != nil {
+			t.Fatalf("run: %v", err)
+		}
+		for key, value := range h.importer.stamp[0] {
+			for _, forbidden := range []string{h.dsn, "postgres://", "mysql://", "@"} {
+				if forbidden != "" && strings.Contains(value, forbidden) {
+					t.Errorf("%s = %q carries %q, which puts a connection string on every fact", key, value, forbidden)
+				}
+			}
+		}
+	})
 }

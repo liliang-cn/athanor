@@ -8,7 +8,10 @@ import (
 	"sort"
 	"strings"
 
+	"time"
+
 	"github.com/liliang-cn/cortexdb/v2/pkg/connector"
+	"github.com/liliang-cn/cortexdb/v2/pkg/cortexdb"
 	"github.com/liliang-cn/cortexdb/v2/pkg/importflow"
 )
 
@@ -102,7 +105,7 @@ func (s *storeImpl) run(ctx context.Context, req RunRequest, actor string) (RunR
 			rep.Errors = append(rep.Errors, err.Error())
 		}
 	} else {
-		out, err := s.importer.Run(ctx, clean, mapping)
+		out, err := s.importer.Run(ctx, clean, mapping, runProvenance(p.Plan, rep, actor))
 		if err != nil {
 			return RunReport{}, fmt.Errorf("livedb: import under %s: %w", p.ID, err)
 		}
@@ -406,4 +409,36 @@ func orEmpty(in []string) []string {
 		return []string{}
 	}
 	return in
+}
+
+// runProvenance is what every fact this run writes will carry.
+//
+// The grade is asserted, and the vocabulary already had the word for why: a
+// source said so and nothing has checked it. That is exactly a row out of
+// somebody's production database. It is tempting to grade it higher — a system
+// of record feels more trustworthy than a model's guess — but the ladder
+// measures whether anybody checked, not how reliable the producer feels, and
+// collapsing those two is how a grade stops meaning anything. What the fact
+// came out of is said by the producer instead: tabular, not llm-extract.
+//
+// The source names the plan, never the DSN. A plan id resolves to the database,
+// the tables, the desensitization and the signature through the ledger, and a
+// source string is read by everyone who can read the record — which is the
+// reason the contract's own documentation says never to put a credential in
+// one. _by is the operator who ran it, _run the run whose report says how many
+// rows were read and what drifted.
+func runProvenance(p Plan, rep RunReport, actor string) map[string]string {
+	return map[string]string{
+		cortexdb.KeySource:   "athanor:livedb:" + p.ID,
+		cortexdb.KeyProducer: cortexdb.ProducerTabular,
+		cortexdb.KeyGrade:    cortexdb.GradeAsserted,
+		cortexdb.KeyBy:       actor,
+		cortexdb.KeyAt:       rep.StartedAt.UTC().Format(time.RFC3339),
+		// -1 is the contract's own word for a producer that did not work in
+		// chunks: there is no passage to quote, only a row.
+		cortexdb.KeyChunk: "-1",
+		// _run has no constant upstream, but the contract's documentation
+		// names it as the key that points back at the job, and this is that.
+		cortexdb.ContractPrefix + "run": rep.ID,
+	}
 }

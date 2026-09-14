@@ -401,8 +401,14 @@ func WithClock(now func() time.Time) Option { return func(s *Store) { s.impl.now
 func WithImporter(im Importer) Option { return func(s *Store) { s.impl.importer = im } }
 
 // Importer is the half of importflow.Importer this package uses.
+//
+// Run takes the provenance its output must carry rather than reading it off a
+// field fixed when the engine was built: what a run stamps names that run, its
+// plan and the operator who authorized it, and an engine built once per process
+// cannot know any of the three. Passing it through the seam also means a test
+// double sees exactly what a real import would have written.
 type Importer interface {
-	Run(ctx context.Context, src importflow.Source, plan importflow.MappingPlan) (*importflow.Report, error)
+	Run(ctx context.Context, src importflow.Source, plan importflow.MappingPlan, provenance map[string]string) (*importflow.Report, error)
 }
 
 // ListQuery filters List.
