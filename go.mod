@@ -9,7 +9,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/liliang-cn/alchemy v0.6.4
 	github.com/liliang-cn/alchemy/connectors v0.6.4
-	github.com/liliang-cn/cortexdb/v2 v2.106.0
+	github.com/liliang-cn/cortexdb/v2 v2.107.0
 	google.golang.org/grpc v1.83.2
 )
 
